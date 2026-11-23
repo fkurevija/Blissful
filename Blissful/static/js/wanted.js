@@ -64,7 +64,10 @@ function wantedToast(id, message, type) {
         el = document.createElement('div');
         el.id = id;
         el.className = 'wanted-toast';
-        el.innerHTML = '<span class="wanted-toast-dot"></span><span class="wanted-toast-text"></span>';
+        el.innerHTML = '<span class="wanted-toast-dot"></span><span class="wanted-toast-text"></span>' +
+            '<button type="button" class="wanted-toast-link" style="display:none">View downloads →</button>';
+        const link = el.querySelector('.wanted-toast-link');
+        link.addEventListener('click', () => showDownloadsTab());
         document.body.appendChild(el);
     }
     el.dataset.type = type || 'info';
@@ -73,11 +76,13 @@ function wantedToast(id, message, type) {
     return el;
 }
 
-function finishWantedToast(message, type) {
+function finishWantedToast(message, type, showLink) {
     const state = wantedToastState[WANTED_TOAST_ID] || { done: false };
     state.done = true;
     wantedActiveShown = false;
-    wantedToast(WANTED_TOAST_ID, message, type);
+    const el = wantedToast(WANTED_TOAST_ID, message, type);
+    const link = el.querySelector('.wanted-toast-link');
+    if (link) link.style.display = showLink ? 'inline-block' : 'none';
     setTimeout(() => {
         const el = document.getElementById(WANTED_TOAST_ID);
         if (el) el.remove();
@@ -104,25 +109,11 @@ async function pollWantedProgress(label) {
                 } else if (active.album) {
                     parts.push(`album #${active.album}`);
                 }
-                for (const key of ['missing', 'tracks', 'job_status',
-                                   'download_track', 'download_source',
-                                   'download_status', 'download_pending',
-                                   'verified', 'total', 'searched', 'imported',
-                                   'deleted']) {
+                for (const key of ['job_status', 'download_track',
+                                   'verified', 'total', 'imported', 'deleted']) {
                     if (active[key] !== undefined && active[key] !== null && active[key] !== '') {
                         parts.push(`${key.replace('download_', '')} ${active[key]}`);
                     }
-                }
-                const attempts = active.download_attempts || [];
-                if (attempts.length) {
-                    const marks = attempts.slice(-4).map(a => {
-                        const name = String(a.source || '')
-                            .replace(/^(yt|sc)search1:/, '').split(':')[0];
-                        const mark = a.status === 'success' ? '✓'
-                            : a.status === 'rejected' ? '⊘' : '✗';
-                        return `${name} ${mark}`;
-                    });
-                    if (marks.length) parts.push('sources ' + marks.join(', '));
                 }
                 if (parts.length) detail += ' · ' + parts.join(', ');
             }
@@ -330,7 +321,7 @@ async function runWantedSearch(mode) {
         const message = apply
             ? `Search ${result.success ? 'completed' : 'finished with failures'} — ${result.count} album(s).${cmd}${fallback}`
             : `Dry run complete — ${result.count} album(s) would be searched`;
-        finishWantedToast(message, 'success');
+        finishWantedToast(message, 'success', apply);
     } catch (error) {
         if (error.status === 409) {
             const kind = (error.data && error.data.active && error.data.active.kind) || 'run';
@@ -362,7 +353,7 @@ async function runStaleCleanup() {
         const message = apply
             ? `Cleanup finished — imported ${counts.imported || 0}, deleted ${counts.deleted || 0}, kept ${counts.kept || 0}, skipped ${counts.skipped || 0}${detail ? ' — ' + detail : ''}`
             : `Dry run complete — ${counts.scanned || 0} stale item(s) found, ${counts.skipped || 0} skipped${detail ? ' — ' + detail : ''}`;
-        finishWantedToast(message, 'success');
+        finishWantedToast(message, 'success', apply);
         if (apply) loadStale(true);
     } catch (error) {
         if (error.status === 409) {

@@ -38,6 +38,7 @@
             <button class="tab-button" onclick="openTab(event, 'sources-tab')">Sources</button>
             <button class="tab-button" onclick="openTab(event, 'path-tab')">Mapping</button>
             <button class="tab-button" onclick="openTab(event, 'wanted-tab')">Wanted</button>
+            <button class="tab-button" onclick="openTab(event, 'downloads-tab')">Downloads</button>
             <button class="tab-button" onclick="openTab(event, 'request-tab')">Requests</button>
             <button class="tab-button" onclick="openTab(event, 'tools-tab')">Tools</button>
             <button class="tab-button" onclick="openTab(event, 'userscript-tab')">Userscript</button>
@@ -50,6 +51,7 @@
         {% include 'tabs/sources_tab.html' %}
         {% include 'tabs/path_tab.html' %}
         {% include 'tabs/wanted_tab.html' %}
+        {% include 'tabs/downloads_tab.html' %}
         {% include 'tabs/request_tab.html' %}
         {% include 'tabs/tools_tab.html' %}
         {% include 'tabs/userscript_tab.html' %}
@@ -79,6 +81,7 @@
     <script src="/static/js/sources.js?v={{ static_version }}"></script>
     <script src="/static/js/paths.js?v={{ static_version }}"></script>
     <script src="/static/js/wanted.js?v={{ static_version }}"></script>
+    <script src="/static/js/downloads.js?v={{ static_version }}"></script>
     <script src="/static/js/documentation.js?v={{ static_version }}"></script>
     <script src="/static/js/main.js?v={{ static_version }}"></script>
 </body>

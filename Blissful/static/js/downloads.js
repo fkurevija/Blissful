@@ -1,0 +1,123 @@
+// Downloads tab: job queue and history.
+'use strict';
+
+let jobsAutoRefresh = null;
+
+function showDownloadsTab() {
+    const button = [...document.querySelectorAll('.tab-button')]
+        .find(b => b.textContent.includes('Downloads'));
+    if (button) openTab({ currentTarget: button }, 'downloads-tab');
+}
+
+function jobLabel(job) {
+    const payload = job.payload || {};
+    const artist = payload.artist || '';
+    const album = payload.album || '';
+    if (artist && album) return `${artist} — ${album}`;
+    return album || artist || job.dedupe_key || job.id;
+}
+
+function renderJobs(jobs) {
+    const list = document.getElementById('jobsList');
+    const summary = document.getElementById('jobsSummary');
+    if (!list || !summary) return;
+    const counts = { pending: 0, running: 0, succeeded: 0, failed: 0 };
+    jobs.forEach(job => {
+        if (counts[job.status] !== undefined) counts[job.status] += 1;
+    });
+    summary.textContent = `Pending ${counts.pending} · Running ${counts.running} · Succeeded ${counts.succeeded} · Failed ${counts.failed}`;
+    list.innerHTML = '';
+    if (!jobs.length) {
+        list.innerHTML = '<div style="padding:12px"><em>No jobs yet.</em></div>';
+        return;
+    }
+    const table = document.createElement('table');
+    table.className = 'jobs-table';
+    const head = document.createElement('thead');
+    head.innerHTML = '<tr><th>Status</th><th>Job</th><th>Source</th><th>Updated</th><th>Detail</th><th></th></tr>';
+    table.appendChild(head);
+    const body = document.createElement('tbody');
+    jobs.forEach(job => {
+        const row = document.createElement('tr');
+        const status = document.createElement('td');
+        status.className = 'job-status';
+        status.dataset.status = job.status;
+        status.textContent = job.status;
+        row.appendChild(status);
+
+        const label = document.createElement('td');
+        label.textContent = jobLabel(job);
+        const tracks = (job.payload || {}).tracks || [];
+        if (tracks.length) label.textContent += ` (${tracks.length} track${tracks.length === 1 ? '' : 's'})`;
+        row.appendChild(label);
+
+        const source = document.createElement('td');
+        source.textContent = job.source || '';
+        row.appendChild(source);
+
+        const updated = document.createElement('td');
+        updated.textContent = job.updated_at ? String(job.updated_at).replace('T', ' ').slice(0, 19) : '';
+        row.appendChild(updated);
+
+        const detail = document.createElement('td');
+        detail.className = 'job-reason';
+        const result = job.result || {};
+        const parts = [];
+        if (job.failure_reason) parts.push(job.failure_reason);
+        if (result.successful !== undefined) parts.push(`${result.successful} imported`);
+        if (result.failed) parts.push(`${result.failed} failed`);
+        if (result.total_tracks) parts.push(`${result.total_tracks} total`);
+        detail.textContent = parts.join(' · ');
+        row.appendChild(detail);
+
+        const actions = document.createElement('td');
+        if (job.status === 'failed' || job.status === 'succeeded') {
+            const retry = document.createElement('button');
+            retry.type = 'button';
+            retry.className = 'btn btn-secondary';
+            retry.textContent = 'Retry';
+            retry.addEventListener('click', async () => {
+                try {
+                    const res = await fetch(`/api/jobs/${job.id}/retry`, { method: 'POST' });
+                    const data = await res.json();
+                    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+                    loadJobs();
+                } catch (error) {
+                    showNotification(`Retry failed: ${error.message}`, 'error');
+                }
+            });
+            actions.appendChild(retry);
+        }
+        row.appendChild(actions);
+        body.appendChild(row);
+    });
+    table.appendChild(body);
+    list.appendChild(table);
+}
+
+async function loadJobs() {
+    try {
+        const res = await fetch('/api/jobs?limit=100');
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+        renderJobs(data.jobs || []);
+    } catch (error) {
+        const list = document.getElementById('jobsList');
+        if (list) list.textContent = `Could not load jobs: ${error.message}`;
+    }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    const refresh = document.getElementById('refreshJobs');
+    if (refresh) refresh.addEventListener('click', loadJobs);
+    const toggle = document.getElementById('autoRefreshJobs');
+    if (toggle) {
+        toggle.checked = true;
+        toggle.addEventListener('change', () => {
+            if (jobsAutoRefresh) clearInterval(jobsAutoRefresh);
+            jobsAutoRefresh = toggle.checked ? setInterval(loadJobs, 5000) : null;
+        });
+    }
+    loadJobs();
+    jobsAutoRefresh = setInterval(loadJobs, 5000);
+});
