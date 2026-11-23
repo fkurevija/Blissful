@@ -223,3 +223,37 @@ def test_userscript_injects_token_and_server_url(tmp_path):
     assert 'authToken: "script-token"' in script
     assert 'microserviceUrl: "http://blissful.local:7373"' in script
     assert '${CONFIG.authToken}' in script
+
+
+def test_source_manager_never_advertises_spotify():
+    from extend.source_manager import SourceManager
+
+    manager = SourceManager()
+    sources = manager.get_all_extractors()
+    assert sources, "expected yt-dlp extractors to load"
+    assert not any('spotify' in (s['name'] + s['ie_key']).lower() for s in sources)
+    assert manager.search_extractors('spotify') == []
+
+
+def test_saved_spotify_priority_is_dropped(tmp_path):
+    cfg_file = tmp_path / 'config.json'
+    cfg_file.write_text(json.dumps({
+        'source_priorities': [
+            {'name': 'YouTube', 'search': 'youtube.com', 'enabled': True},
+            {'name': 'Spotify', 'search': 'spotify.com', 'enabled': True},
+        ]
+    }), encoding='utf-8')
+    cfg = ConfigManager(config_file=str(cfg_file))
+    merged = cfg.get_config()
+    assert cfg.save_config(merged)
+    assert all('spotify' not in str(p).lower() for p in cfg.get_config()['source_priorities'])
+
+
+def test_security_card_lives_inside_tools_tab():
+    from pathlib import Path
+
+    template = (Path(__file__).resolve().parents[1] / 'templates' / 'tabs' /
+                'tools_tab.html').read_text(encoding='utf-8-sig').replace('\r\n', '\n')
+    tab_start = template.index('<div id="tools-tab"')
+    style_start = template.index('\n<style>')
+    assert tab_start < template.index('API Security') < style_start

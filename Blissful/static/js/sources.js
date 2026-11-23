@@ -7,6 +7,9 @@ let draggedItem = null;
 
 // Load source priorities - shows ALL searchable sources
 function loadSourcePriorities(priorities) {
+    // Spotify is metadata-only in this fork; hide any stale saved entry.
+    priorities = (priorities || []).filter(source =>
+        !/spotify/i.test(source.name || '') && !/spotify/i.test(source.search || ''));
     const container = document.getElementById('sourcePriorityList');
     container.innerHTML = '';
     

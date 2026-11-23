@@ -47,6 +47,12 @@ class SourceManager:
                 try:
                     # Get extractor info
                     ie_key = getattr(extractor_class, 'IE_NAME', extractor_class.__name__)
+
+                    # Spotify is a metadata provider only (SpotifyClient); its
+                    # API does not serve audio and yt-dlp cannot download from it.
+                    if 'spotify' in str(ie_key).lower() or \
+                            'spotify' in extractor_class.__name__.lower():
+                        continue
                     ie_desc = getattr(extractor_class, 'IE_DESC', None) or getattr(extractor_class, '_VALID_URL', 'No description')
                     
                     # Determine if this is likely a music source

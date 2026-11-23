@@ -247,7 +247,13 @@ class ConfigManager:
             validated['embed_thumbnail'] = bool(config['embed_thumbnail'])
         
         if 'source_priorities' in config and isinstance(config['source_priorities'], list):
-            validated['source_priorities'] = config['source_priorities']
+            # Spotify is metadata-only in this fork; drop stale saved entries.
+            validated['source_priorities'] = [
+                source for source in config['source_priorities']
+                if not isinstance(source, dict)
+                or ('spotify' not in str(source.get('name', '')).lower()
+                    and 'spotify' not in str(source.get('search', '')).lower())
+            ]
         
         # Request system settings
         if 'enable_requests' in config:
