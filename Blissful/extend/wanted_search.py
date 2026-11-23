@@ -108,7 +108,7 @@ class WantedSearchService:
     def _prefer_gapfill(self):
         return self._config().get('prefer_blissful_for_stale', True) is not False
 
-    def _gapfill_album(self, album_id, apply=True):
+    def _gapfill_album(self, album_id, apply=True, source='stale-cleanup'):
         """Hand an album to Blissful's own download/tag/link engine."""
         if self.gapfill is None:
             return {'status': 'failed',
@@ -118,7 +118,7 @@ class WantedSearchService:
             def progress(phase, **details):
                 self._set_active(phase=phase, album=album_id, **details)
 
-            return engine(album_id, apply=apply, source='stale-cleanup',
+            return engine(album_id, apply=apply, source=source,
                           progress=progress)
         if callable(self.gapfill):
             return self.gapfill(album_id, apply=apply)
@@ -457,16 +457,24 @@ class WantedSearchService:
             except (TypeError, ValueError):
                 continue
         mode = 'selected' if ids else 'all'
+        wanted = self.get_wanted()
+        if ids:
+            selected = {str(value) for value in ids}
+            wanted = [item for item in wanted
+                      if str(item.get('albumId')) in selected]
         report = {
             'success': True,
             'mode': mode,
-            'count': len(ids),
+            'count': len(wanted),
             'applied': apply,
             'command_id': None,
             'note': '',
+            'fallback': [],
         }
         if not apply:
-            report['note'] = 'dry run - no command posted'
+            report['note'] = 'dry run - no command or download'
+            report['albums'] = [{'album': item.get('albumId'),
+                                 'title': item.get('title')} for item in wanted]
             return report
 
         client = self._get_client()
@@ -493,7 +501,7 @@ class WantedSearchService:
 
         def progress(phase, **details):
             self._set_active(phase=phase, kind='search', mode=mode,
-                             count=len(ids), **details)
+                             count=len(wanted), **details)
 
         progress('Lidarr search queued', command_status='queued')
         try:
@@ -510,6 +518,40 @@ class WantedSearchService:
             report['success'] = False
             report['error'] = (report['command_message'] or
                                'Lidarr search did not complete')
+
+        # Lidarr searches torrents first. Anything it still cannot source is
+        # handed to Blissful's own yt-dlp bridge, which is why users come here.
+        if self._config().get('prefer_blissful_for_wanted', True) is not False:
+            progress('checking Lidarr results', command_status=status)
+            for index, item in enumerate(wanted, 1):
+                aid = item.get('albumId')
+                if not aid:
+                    continue
+                try:
+                    tracks = client.get_album_tracks(aid) or []
+                except Exception:
+                    tracks = []
+                if self._missing_count(tracks) == 0:
+                    continue
+                progress('Blissful fallback gap-fill', album=aid,
+                         album_title=item.get('title', ''),
+                         processed=index, total=len(wanted))
+                try:
+                    gap = self._gapfill_album(
+                        aid, apply=True, source='wanted-search-fallback') or {}
+                except Exception as exc:
+                    gap = {'status': 'failed', 'reason': self._safe_error(exc)}
+                gap_status = _lower(str(gap.get('status') or ''))
+                report['fallback'].append({
+                    'album': aid,
+                    'title': item.get('title', ''),
+                    'status': gap_status,
+                    'reason': str(gap.get('reason') or '')[:200],
+                    'missing': self._missing_count(tracks),
+                })
+                if gap_status not in ('succeeded', 'success', 'skipped'):
+                    report['success'] = False
+            progress('search finished', fallback=len(report['fallback']))
         return report
 
     # ----------------------------------------------------------------- cleanup

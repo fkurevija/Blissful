@@ -26,10 +26,13 @@ is active (including runs started by the scheduler or another tab).
 1. Click **Load list** (Lidarr's Wanted → Missing list, paginated at 200/page).
 2. Tick specific albums, or use **Search all missing**.
 3. With *Apply* unchecked you get a preview of what would be searched. With it
-   checked, Blissful queues `AlbumSearch` for the selected album IDs, or
-   `MissingAlbumSearch` for all missing albums, then waits for the Lidarr command
-   to finish. The progress toast stays up during that wait and a second search
-   or cleanup is blocked until it completes.
+   checked, Blissful first triggers Lidarr's `MissingAlbumSearch` (or
+   `AlbumSearch` for a selection) and waits for it to finish. Any album that
+   still has missing tracks is then handed to Blissful's own yt-dlp bridge —
+   Lidarr tries torrents first, Blissful fills what it could not find. The
+   progress toast stays up through both phases and a second search or cleanup
+   is blocked until it completes. Set `PREFER_BLISSFUL_FOR_WANTED=false` to
+   skip the Blissful fallback.
 
 ## Stale torrents
 

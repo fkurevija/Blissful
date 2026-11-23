@@ -324,10 +324,11 @@ async function runWantedSearch(mode) {
         });
         wantedResult('wantedResult', result);
         const cmd = apply && result.command_status
-            ? ` (${result.command_status}${result.command_message ? ': ' + result.command_message : ''})`
-            : '';
+            ? ` Lidarr: ${result.command_status}${result.command_message ? ' (' + result.command_message + ')' : ''}` : '';
+        const fallback = apply && result.fallback && result.fallback.length
+            ? ` · Blissful fallback: ${result.fallback.length} album(s)` : '';
         const message = apply
-            ? `Search ${result.success ? 'completed' : 'failed'} — ${result.count} album(s)${cmd}`
+            ? `Search ${result.success ? 'completed' : 'finished with failures'} — ${result.count} album(s).${cmd}${fallback}`
             : `Dry run complete — ${result.count} album(s) would be searched`;
         finishWantedToast(message, 'success');
     } catch (error) {

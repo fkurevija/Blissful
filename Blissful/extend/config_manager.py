@@ -60,6 +60,7 @@ class ConfigManager:
             'GAPFILL_JOB_TIMEOUT_MINUTES': 'gapfill_job_timeout_minutes',
             'STALE_CLEANUP_REMOVE_FROM_CLIENT': 'stale_cleanup_remove_from_client',
             'WANTED_SEARCH_TIMEOUT_MINUTES': 'wanted_search_timeout_minutes',
+            'PREFER_BLISSFUL_FOR_WANTED': 'prefer_blissful_for_wanted',
             'SPOTIFY_CLIENT_ID': 'spotify_client_id',
             'SPOTIFY_CLIENT_SECRET': 'spotify_client_secret',
             'POT_PROVIDER_URL': 'pot_provider_url',
@@ -138,6 +139,7 @@ class ConfigManager:
             'gapfill_job_timeout_minutes': 15,
             'stale_cleanup_remove_from_client': True,
             'wanted_search_timeout_minutes': 10,
+            'prefer_blissful_for_wanted': True,
             # Request system defaults
             'enable_requests': False,
             'auto_monitor_requests': False,
@@ -314,7 +316,8 @@ class ConfigManager:
                     'validate_duration', 'use_lidarr_naming', 'enable_jobs',
                     'auto_retry_failed', 'wanted_search_enabled',
                     'stale_cleanup_enabled', 'prefer_blissful_for_stale',
-                    'stale_cleanup_remove_from_client'):
+                    'stale_cleanup_remove_from_client',
+                    'prefer_blissful_for_wanted'):
             if key in config:
                 validated[key] = bool(config[key])
         for key in ('spotify_client_id', 'spotify_client_secret', 'auth_token'):

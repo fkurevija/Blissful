@@ -546,6 +546,7 @@ def test_config_has_wanted_search_defaults(tmp_path):
     assert cfg['gapfill_job_timeout_minutes'] == 15
     assert cfg['stale_cleanup_remove_from_client'] is True
     assert cfg['wanted_search_timeout_minutes'] == 10
+    assert cfg['prefer_blissful_for_wanted'] is True
 
 
 def test_lidarr_wanted_and_queue_delete(monkeypatch):
@@ -597,6 +598,9 @@ def _wanted_service(tmp_path, enabled=True, client=None, gapfill=None,
                 'stale_cleanup_interval_hours': 6,
                 'stale_cleanup_wait_minutes': 10,
                 'prefer_blissful_for_stale': prefer_gapfill,
+                'wanted_search_timeout_minutes': 10,
+                'prefer_blissful_for_wanted': True,
+                'stale_cleanup_remove_from_client': True,
             }
 
     svc = WantedSearchService(Config(), client or object(),
@@ -608,7 +612,14 @@ def _wanted_service(tmp_path, enabled=True, client=None, gapfill=None,
 
 
 def test_wanted_search_dry_run_and_gate(tmp_path):
-    svc = _wanted_service(tmp_path, enabled=True)
+    class Client:
+        def get_wanted_missing(self, page=1, page_size=200):
+            return {'totalRecords': 2, 'records': [
+                {'id': 1, 'title': 'One', 'artist': {'artistName': 'A'}},
+                {'id': 2, 'title': 'Two', 'artist': {'artistName': 'B'}},
+            ]}
+
+    svc = _wanted_service(tmp_path, enabled=True, client=Client())
     report = svc.search(album_ids=[1, 2], apply=False)
     assert report['success'] is True
     assert report['applied'] is False
@@ -625,22 +636,39 @@ def test_wanted_search_apply_posts_commands(tmp_path):
     calls = []
 
     class Client:
+        def get_wanted_missing(self, page=1, page_size=200):
+            return {'totalRecords': 1, 'records': [{
+                'id': 3, 'title': 'Still Missing',
+                'artist': {'artistName': 'Artist'}, 'albumType': 'Album',
+                'releaseDate': '2026-01-01T00:00:00Z', 'monitored': True,
+            }]}
+
+        def get_album_tracks(self, aid):
+            return [{'id': 1, 'hasFile': False}]
+
         def post_command(self, name, **body):
             calls.append((name, body))
             return {'id': 42}
 
         def get_command(self, cid):
-            return {'id': cid, 'status': 'completed', 'message': 'ok'}
+            return {'id': cid, 'status': 'completed', 'message': '0 reports downloaded'}
 
-    svc = _wanted_service(tmp_path, client=Client())
+    class Gapfill:
+        def gapfill_album(self, aid, apply=True, source='', progress=None):
+            calls.append(('gapfill', aid, source))
+            return {'status': 'succeeded', 'imported': 1}
+
+    svc = _wanted_service(tmp_path, client=Client(), gapfill=Gapfill())
     selected = svc.search(album_ids=['3', 'bad'], apply=True)
     assert selected['command_id'] == 42
     assert selected['command_status'] == 'completed'
-    assert calls == [('AlbumSearch', {'albumIds': [3]})]
+    assert calls[0] == ('AlbumSearch', {'albumIds': [3]})
+    assert ('gapfill', 3, 'wanted-search-fallback') in calls
+    assert selected['fallback'][0]['status'] == 'succeeded'
 
     all_report = svc.search(apply=True)
     assert all_report['mode'] == 'all'
-    assert calls[-1] == ('MissingAlbumSearch', {})
+    assert ('MissingAlbumSearch', {}) in calls
 
 
 def test_stale_cleanup_deletes_only_after_import(tmp_path, monkeypatch):
