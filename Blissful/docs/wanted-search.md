@@ -5,8 +5,9 @@ and clean up torrents that are stuck. Every manual action is **dry-run by
 default** — tick *Apply* to actually queue searches or delete queue entries.
 A sticky toast in the corner shows a short progress summary and finishes with a
 success or failure message plus a **View downloads** link. Full queue details,
-history and retry controls live on the new **Downloads** tab. Job history is
-stored in `/app/downloads/jobs.json`, so it survives container recreation. Only
+history and retry controls live on the new **Downloads** tab, whose columns can
+be sorted. Job history is stored in `/app/downloads/jobs.json`, so it survives
+container recreation.
 one search or cleanup may run at a time; the action buttons are disabled while a
 run is active (including runs started by the scheduler or another tab).
 

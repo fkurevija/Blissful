@@ -2,6 +2,26 @@
 'use strict';
 
 let jobsAutoRefresh = null;
+let jobsSort = { key: 'updated_at', dir: 'desc' };
+let currentJobs = [];
+
+function sortJobsBy(key) {
+    if (jobsSort.key === key) {
+        jobsSort.dir = jobsSort.dir === 'asc' ? 'desc' : 'asc';
+    } else {
+        jobsSort = { key: key, dir: 'asc' };
+    }
+    renderJobs(currentJobs);
+}
+
+function jobSortValue(job, key) {
+    if (key === 'status') return job.status || '';
+    if (key === 'job') return jobLabel(job).toLowerCase();
+    if (key === 'source') return job.source || '';
+    if (key === 'updated') return job.updated_at || '';
+    if (key === 'detail') return job.failure_reason || '';
+    return '';
+}
 
 function showDownloadsTab() {
     const button = [...document.querySelectorAll('.tab-button')]
@@ -21,23 +41,46 @@ function renderJobs(jobs) {
     const list = document.getElementById('jobsList');
     const summary = document.getElementById('jobsSummary');
     if (!list || !summary) return;
+    currentJobs = jobs || [];
+    const sorted = currentJobs.slice().sort((a, b) => {
+        const av = String(jobSortValue(a, jobsSort.key)).toLowerCase();
+        const bv = String(jobSortValue(b, jobsSort.key)).toLowerCase();
+        const result = av.localeCompare(bv);
+        return jobsSort.dir === 'asc' ? result : -result;
+    });
     const counts = { pending: 0, running: 0, succeeded: 0, failed: 0 };
-    jobs.forEach(job => {
+    currentJobs.forEach(job => {
         if (counts[job.status] !== undefined) counts[job.status] += 1;
     });
     summary.textContent = `Pending ${counts.pending} · Running ${counts.running} · Succeeded ${counts.succeeded} · Failed ${counts.failed}`;
     list.innerHTML = '';
-    if (!jobs.length) {
+    if (!currentJobs.length) {
         list.innerHTML = '<div style="padding:12px"><em>No jobs yet.</em></div>';
         return;
     }
     const table = document.createElement('table');
     table.className = 'jobs-table';
     const head = document.createElement('thead');
-    head.innerHTML = '<tr><th>Status</th><th>Job</th><th>Source</th><th>Updated</th><th>Detail</th><th></th></tr>';
+    const headRow = document.createElement('tr');
+    const columns = [
+        ['status', 'Status'], ['job', 'Job'], ['source', 'Source'],
+        ['updated', 'Updated'], ['detail', 'Detail']
+    ];
+    columns.forEach(([key, label]) => {
+        const th = document.createElement('th');
+        th.dataset.sortKey = key;
+        const arrow = jobsSort.key === key ? (jobsSort.dir === 'asc' ? ' ▲' : ' ▼') : '';
+        th.textContent = label + arrow;
+        th.addEventListener('click', () => sortJobsBy(key));
+        headRow.appendChild(th);
+    });
+    const actionHead = document.createElement('th');
+    actionHead.textContent = '';
+    headRow.appendChild(actionHead);
+    head.appendChild(headRow);
     table.appendChild(head);
     const body = document.createElement('tbody');
-    jobs.forEach(job => {
+    sorted.forEach(job => {
         const row = document.createElement('tr');
         const status = document.createElement('td');
         status.className = 'job-status';
