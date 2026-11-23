@@ -123,7 +123,7 @@ function renderJobs(jobs) {
         row.appendChild(detail);
 
         const actions = document.createElement('td');
-        if (job.status === 'failed' || job.status === 'succeeded') {
+        if (job.status === 'failed') {
             const retry = document.createElement('button');
             retry.type = 'button';
             retry.className = 'btn btn-secondary';
