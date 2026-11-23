@@ -97,6 +97,34 @@ class WantedSearchService:
         self._stop_event = None
         self._scheduler_thread = None
         self._last_scheduled = 0.0
+        self._active = None
+        self._last_activity = None
+        self._active_lock = threading.Lock()
+
+    # ------------------------------------------------------------- progress
+    def get_active(self):
+        """Snapshot of the in-flight run (safe to read from the web thread)."""
+        with self._active_lock:
+            return dict(self._active) if self._active else None
+
+    def get_last_activity(self):
+        with self._active_lock:
+            return dict(self._last_activity) if self._last_activity else None
+
+    def _set_active(self, **updates):
+        with self._active_lock:
+            if self._active is None:
+                self._active = {}
+            self._active.update(updates)
+            self._active['updated_at'] = time.time()
+            return dict(self._active)
+
+    def _finish_active(self, status):
+        with self._active_lock:
+            if self._active:
+                self._active.update(status=status, finished_at=time.time())
+                self._last_activity = dict(self._active)
+            self._active = None
 
     # ------------------------------------------------------------------ client
     def _get_client(self):
@@ -468,6 +496,9 @@ class WantedSearchService:
         """
         apply = bool(apply)
         report = self._empty_cleanup_report(apply)
+        self._set_active(kind='cleanup', apply=apply, phase='scanning',
+                         started_at=time.time(), scanned=0, searched=0,
+                         imported=0, deleted=0, kept=0, skipped=0, errors=0)
         state = self._load_state()
         albums_state = state.get('albums')
         if not isinstance(albums_state, dict):
@@ -480,6 +511,7 @@ class WantedSearchService:
             stale = [record for record in stale
                      if str(record.get('id')) in selected]
         report['scanned'] = list(stale)
+        self._set_active(phase='searching', scanned=len(stale))
 
         def already_recorded(album_id):
             if str(album_id) in albums_state:
@@ -505,6 +537,7 @@ class WantedSearchService:
             report['counts'] = {key: len(report[key]) for key in
                                 ('scanned', 'searched', 'imported', 'deleted',
                                  'kept', 'skipped', 'errors')}
+            self._finish_active('failed')
             return report
         try:
             wait_s = max(1, int(float(wait_minutes)) * 60)
@@ -553,6 +586,8 @@ class WantedSearchService:
                     'baseline_missing': baseline_missing,
                     'command_id': command_id,
                 })
+                self._set_active(phase='waiting for import', album=album_id,
+                                 searched=len(report['searched']))
 
                 command = self._poll_command(client, command_id)
                 status = _lower(command.get('status'))
@@ -574,6 +609,8 @@ class WantedSearchService:
                     'title': title,
                     'baseline_missing': baseline_missing,
                 })
+                self._set_active(phase='removing stale queue entry',
+                                 imported=len(report['imported']))
                 for record in records:
                     record_id = record.get('id')
                     try:
@@ -602,6 +639,7 @@ class WantedSearchService:
         report['counts'] = {key: len(report[key]) for key in
                             ('scanned', 'searched', 'imported', 'deleted',
                              'kept', 'skipped', 'errors')}
+        self._finish_active('completed' if not report['errors'] else 'completed with errors')
         return report
 
     # ---------------------------------------------------------------- scheduler

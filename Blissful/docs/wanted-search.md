@@ -3,6 +3,8 @@
 The **Wanted** tab in Blissful's web UI lets you trigger Lidarr searches directly
 and clean up torrents that are stuck. Every manual action is **dry-run by
 default** — tick *Apply* to actually queue searches or delete queue entries.
+A sticky toast in the corner shows progress (phase, elapsed time and counts
+during stale cleanup) and finishes with a success or failure message.
 
 ## Controls
 

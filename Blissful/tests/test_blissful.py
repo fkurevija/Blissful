@@ -702,3 +702,48 @@ def test_cli_json_only_emits_pure_json():
     payload = json.loads(result.stdout)
     assert payload['success'] is True
     assert payload['applied'] is False
+
+
+def test_wanted_service_tracks_active_run(tmp_path):
+    svc = _wanted_service(tmp_path)
+    assert svc.get_active() is None
+    svc._set_active(kind='cleanup', phase='searching', scanned=2)
+    active = svc.get_active()
+    assert active['kind'] == 'cleanup'
+    assert active['phase'] == 'searching'
+    svc._finish_active('completed')
+    assert svc.get_active() is None
+    assert svc.get_last_activity()['status'] == 'completed'
+
+
+def test_wanted_status_route_exposes_progress():
+    from flask import Flask
+    from extend.routes import register_routes
+
+    class Stub:
+        def __init__(self, *a, **k):
+            pass
+
+    class Config:
+        def get_config(self):
+            return {'wanted_search_enabled': True, 'stale_cleanup_enabled': False,
+                    'stale_cleanup_interval_hours': 6,
+                    'stale_cleanup_wait_minutes': 10}
+
+    class Wanted:
+        def get_active(self):
+            return {'kind': 'cleanup', 'phase': 'waiting for import', 'searched': 1}
+
+        def get_last_activity(self):
+            return None
+
+    app = Flask(__name__)
+    register_routes(app=app, config_manager=Config(), lidarr_client=Stub,
+                    download_manager=Stub(), audio_converter=Stub(),
+                    source_manager=Stub(), auth_manager=Stub(),
+                    request_manager=Stub(), album_manager=Stub(),
+                    track_manager=Stub(), sources_api=Stub(), system_utils=Stub(),
+                    job_manager=None, wanted_search=Wanted())
+    with app.test_client() as client:
+        data = client.get('/api/wanted/status').get_json()
+    assert data['active']['phase'] == 'waiting for import'
