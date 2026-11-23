@@ -4,8 +4,11 @@ Main application file with modular architecture
 """
 
 from flask import Flask, request
+import argparse
+import json
 import os
 import logging
+import sys
 from urllib.parse import urlparse
 
 # Import configuration and managers from extend folder
@@ -120,13 +123,46 @@ register_routes(
 )
 logger.info("✅ All routes registered successfully")
 
+def parse_args(argv=None):
+    """CLI flags; the web server is the default when none are given."""
+    parser = argparse.ArgumentParser(description='Blissful Lidarr downloader')
+    parser.add_argument('--retry-failed-imports', action='store_true',
+                        help='recovery Lidarr failed imports (dry-run unless --apply)')
+    parser.add_argument('--album-id', type=int, help='limit recovery to one Lidarr album')
+    parser.add_argument('--apply', action='store_true', help='actually download and import')
+    parser.add_argument('--reset', action='store_true', help='clear failed-import state and exit')
+    parser.add_argument('--state-path',
+                        default=os.environ.get('FAILED_IMPORTS_STATE',
+                                               '/app/downloads/failed-imports-state.json'),
+                        help='state file for recovered albums')
+    parser.add_argument('--host-prefix',
+                        default=os.environ.get('FAILED_IMPORTS_HOST_PREFIX', ''),
+                        help='host prefix for file checks, e.g. /mnt/Storage/Music')
+    return parser.parse_args(argv)
+
+
 if __name__ == '__main__':
+    args = parse_args()
+
     # Ensure directories exist
     os.makedirs('downloads', exist_ok=True)
     os.makedirs('downloads/temp', exist_ok=True)
     os.makedirs('config', exist_ok=True)
     os.makedirs('templates', exist_ok=True)
     os.makedirs('static', exist_ok=True)
+
+    if args.retry_failed_imports:
+        from extend.failed_imports import FailedImportsRetry
+        job_manager.start_worker()
+        recovery = FailedImportsRetry(
+            config_manager, LidarrClient, download_manager, album_manager,
+            job_manager, state_path=args.state_path,
+            host_prefix=args.host_prefix or None
+        )
+        report = recovery.run(album_id=args.album_id, apply=args.apply, reset=args.reset)
+        print(json.dumps(report, indent=2, ensure_ascii=False))
+        failed = any(a.get('status') == 'failed' for a in report.get('albums', []))
+        sys.exit(1 if failed else 0)
 
     if not is_enabled(config_manager):
         logger.warning("⚠️  API token is OFF. Anyone who can reach Blissful can change "

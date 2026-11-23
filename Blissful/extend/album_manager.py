@@ -252,12 +252,15 @@ class AlbumManager:
                                 thumbnail_path=thumbnail,
                             )
                         
-                        # Move to target if specified
-                        if target_path and config.get('lidarr_path_mapping'):
+                        # Move to the track's exact Lidarr target when provided.
+                        # Failed-import recovery relies on files landing at the
+                        # path Lidarr's naming template expects, not in temp.
+                        exact_target = track.get('target_path') or target_path
+                        if exact_target:
                             final_path = self.download_manager.move_to_target(
                                 source_file=converted_file,
-                                target_path=track.get('target_path', target_path),
-                                path_mapping=config.get('lidarr_path_mapping')
+                                target_path=exact_target,
+                                path_mapping=config.get('lidarr_path_mapping') or None
                             )
                             track_result['file_path'] = final_path
                         else:

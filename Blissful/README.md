@@ -92,6 +92,7 @@ curl -s http://localhost:7373/api/health
 - 👥 **Request System** - Let users request artists via Jellyfin/Emby/Plex authentication
 - 🎛️ **Audio Processing** - Normalization, format conversion, metadata embedding
 - 🗺️ **Path Mapping** - Support for remote/Docker Lidarr instances
+- 🔁 **Failed Import Recovery** - Retry unhealthy Lidarr imports with native duration/tag verification
 - 🔍 **Source Priorities** - Configure preferred download sources
 
 ---
@@ -222,6 +223,7 @@ Comprehensive documentation is available in the **Docs** tab of the web interfac
 - **⚙️ Configuration** - Advanced settings and options
 - **🎵 Request System** - Setting up user requests
 - **🔧 Troubleshooting** - Common issues and solutions
+- **🔁 Failed Imports** - Native, dry-run-by-default recovery of Lidarr failed imports
 
 ---
 
@@ -256,6 +258,7 @@ Blissful/
 ├── Dockerfile            # Self-contained image (ffmpeg, Deno, yt-dlp, PO provider)
 ├── docker-compose.yml    # Blissful + blissful-pot sidecar on one network
 ├── yt-dlp.conf           # Deno + PO-token provider runtime options
+├── docs/failed-imports.md # Native Lidarr failed-import recovery (CLI)
 ├── entrypoint.sh         # Fixes bind-mount ownership, drops to PUID:PGID
 ├── requirements.txt      # yt-dlp>=2026.10.26, bgutil-ytdlp-pot-provider>=2.0.2
 ├── scripts/

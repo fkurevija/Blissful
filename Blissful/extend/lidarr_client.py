@@ -646,3 +646,71 @@ class LidarrClient:
                 'success': False,
                 'error': str(e)
             }
+
+    def get_queue(self, page: int = 1, page_size: int = 200) -> Dict:
+        """Return one page of the Lidarr queue (default page is only 10)."""
+        try:
+            response = requests.get(
+                f"{self.url}/api/v1/queue",
+                headers=self.headers,
+                params={'page': page, 'pageSize': page_size},
+                timeout=30
+            )
+            if response.status_code == 200:
+                return response.json()
+            logger.error(f"Failed to get Lidarr queue: {response.status_code}")
+            return {'records': [], 'totalRecords': 0}
+        except Exception as exc:
+            logger.error(f"Error getting Lidarr queue: {exc}")
+            return {'records': [], 'totalRecords': 0}
+
+    def get_all_queue_records(self, page_size: int = 200) -> List[Dict]:
+        """Read every queue page until all records are collected."""
+        records: List[Dict] = []
+        page = 1
+        total = 1
+        while len(records) < total:
+            data = self.get_queue(page=page, page_size=page_size)
+            page_records = data.get('records', []) if isinstance(data, dict) else []
+            total = data.get('totalRecords', len(records)) if isinstance(data, dict) else len(records)
+            if not page_records:
+                break
+            records.extend(page_records)
+            page += 1
+            if page > 100:
+                logger.warning("Stopped paginating Lidarr queue after 100 pages")
+                break
+        return records
+
+    def post_command(self, name: str, **body) -> Dict:
+        """POST a Lidarr command (ManualImport, RescanFolders, etc.)."""
+        try:
+            payload = {'name': name, **body}
+            response = requests.post(
+                f"{self.url}/api/v1/command",
+                headers=self.headers,
+                json=payload,
+                timeout=60
+            )
+            if response.status_code in (200, 201):
+                return response.json()
+            logger.error(f"Lidarr command {name} failed: {response.status_code}")
+            return {'success': False, 'error': f'HTTP {response.status_code}'}
+        except Exception as exc:
+            logger.error(f"Error posting Lidarr command {name}: {exc}")
+            return {'success': False, 'error': str(exc)}
+
+    def get_command(self, command_id: int) -> Dict:
+        """Poll a Lidarr command by id."""
+        try:
+            response = requests.get(
+                f"{self.url}/api/v1/command/{command_id}",
+                headers=self.headers,
+                timeout=30
+            )
+            if response.status_code == 200:
+                return response.json()
+            return {'status': 'failed', 'message': f'HTTP {response.status_code}'}
+        except Exception as exc:
+            logger.error(f"Error polling Lidarr command {command_id}: {exc}")
+            return {'status': 'failed', 'message': str(exc)}

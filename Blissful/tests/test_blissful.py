@@ -257,3 +257,279 @@ def test_security_card_lives_inside_tools_tab():
     tab_start = template.index('<div id="tools-tab"')
     style_start = template.index('\n<style>')
     assert tab_start < template.index('API Security') < style_start
+
+
+def test_naming_preserves_vinyl_positions_and_drops_empty_year():
+    from extend.naming import render_track_filename
+
+    name = render_track_filename(
+        '{Artist Name}/{Album Title} ({Release Year})/{track:00} - {Track Title}',
+        {'artist': 'A', 'album': 'B', 'year': '', 'track': 'A1', 'title': 'Song'},
+    )
+    assert 'A1 - Song' in name
+    assert '()' not in name
+
+
+def test_naming_supports_lidarr_medium_tokens():
+    from extend.naming import render_track_filename
+
+    name = render_track_filename(
+        '{medium:00}-{track:00} - {Track Title} [{Medium Format}]',
+        {'disc': 2, 'track': 3, 'title': 'Song', 'mediumFormat': 'LP'},
+    )
+    assert name == '02-03 - Song [LP]'
+
+
+def test_lidarr_queue_is_paginated(monkeypatch):
+    from extend.lidarr_client import LidarrClient
+
+    calls = []
+
+    class FakeResponse:
+        status_code = 200
+
+        def json(self):
+            page = calls[-1]['params']['page']
+            size = calls[-1]['params']['pageSize']
+            count = 250
+            start = (page - 1) * size
+            return {'totalRecords': count, 'records': [{'id': i} for i in range(start, min(start + size, count))]}
+
+    def fake_get(url, **kwargs):
+        calls.append(kwargs)
+        return FakeResponse()
+
+    monkeypatch.setattr('requests.get', fake_get)
+    client = LidarrClient('http://lidarr:8686', 'key')
+    records = client.get_all_queue_records(page_size=200)
+    assert len(records) == 250
+    assert [c['params']['page'] for c in calls] == [1, 2]
+
+
+def test_lidarr_post_and_poll_command(monkeypatch):
+    from extend.lidarr_client import LidarrClient
+
+    posted = {}
+
+    class FakeResponse:
+        status_code = 201
+
+        def json(self):
+            return {'id': 77, 'status': 'queued'}
+
+    def fake_post(url, **kwargs):
+        posted['json'] = kwargs['json']
+        return FakeResponse()
+
+    def fake_get(url, **kwargs):
+        class Poll:
+            status_code = 200
+
+            def json(self):
+                return {'id': 77, 'status': 'completed'}
+        return Poll()
+
+    monkeypatch.setattr('requests.post', fake_post)
+    monkeypatch.setattr('requests.get', fake_get)
+    client = LidarrClient('http://lidarr:8686', 'key')
+    assert client.post_command('ManualImport', files=[], importMode=2)['id'] == 77
+    assert posted['json']['name'] == 'ManualImport'
+    assert client.get_command(77)['status'] == 'completed'
+
+
+def test_album_places_files_at_exact_target(tmp_path, monkeypatch):
+    from extend.album_manager import AlbumManager
+
+    class Config:
+        def get_config(self):
+            return {'output_format': 'mp3', 'quality': '320k', 'lidarr_path_mapping': {}}
+
+    class Client:
+        def __init__(self, **kwargs):
+            pass
+
+    class Downloads:
+        def __init__(self):
+            self.moves = []
+
+        def download_track(self, **kwargs):
+            return {'success': True, 'file_path': str(tmp_path / 'src.mp3')}
+
+        def _sanitize_filename(self, name):
+            return name
+
+        def move_to_target(self, source_file, target_path, path_mapping=None):
+            self.moves.append(target_path)
+            return target_path
+
+    class Converter:
+        def convert(self, **kwargs):
+            return kwargs['input_file']
+
+        def add_metadata(self, *a, **k):
+            return True
+
+    downloads = Downloads()
+    result = AlbumManager(Config(), Client, downloads, Converter()).download_album(
+        'Artist', 'Album',
+        [{'title': 'Song', 'target_path': '/media/Music/Artist/Album/01 - Song.mp3'}],
+    )
+    assert result['success'] is True
+    assert downloads.moves == ['/media/Music/Artist/Album/01 - Song.mp3']
+
+
+def _failed_imports_fixtures():
+    queue = [
+        {'albumId': 10, 'downloadId': 'd1', 'title': 'healthy candidate',
+         'errorMessage': 'The download is stalled with no connections'},
+        {'albumId': 10, 'downloadId': 'd1', 'title': 'duplicate',
+         'errorMessage': 'The download is stalled with no connections'},
+        {'albumId': 11, 'downloadId': 'd2', 'title': 'compilation',
+         'errorMessage': 'Sequence contains no matching element'},
+    ]
+    album = {
+        'id': 10, 'title': 'Aeolian', 'monitored': True, 'releaseYear': 2026,
+        'artist': {'id': 5, 'artistName': 'The Ocean',
+                   'path': '/media/Music/The Ocean'},
+        'releases': [{'id': 99, 'monitored': True, 'trackCount': 1}],
+    }
+    tracks = [{'id': 101, 'title': 'Swoon', 'trackNumber': '8',
+               'duration': 300120, 'hasFile': False, 'mediumNumber': 1}]
+    return queue, album, tracks
+
+
+def test_failed_imports_dry_run_filters_and_renders_targets(tmp_path, monkeypatch):
+    from extend.failed_imports import FailedImportsRetry
+
+    queue, album, tracks = _failed_imports_fixtures()
+
+    class Client:
+        def get_all_queue_records(self, page_size=200):
+            return queue
+
+        def get_naming_config(self):
+            return {'standardTrackFormat':
+                    '{Artist Name}/{Album Title} ({Release Year})/{track:00} - {Track Title}'}
+
+        def get_album(self, aid):
+            return album
+
+        def get_album_tracks(self, aid):
+            return tracks
+
+        def post_command(self, *a, **k):
+            raise AssertionError('dry run must not import')
+
+    class Config:
+        def get_config(self):
+            return {'output_format': 'mp3', 'lidarr_path_mapping': {}}
+
+    class Jobs:
+        def enqueue(self, *a, **k):
+            raise AssertionError('dry run must not enqueue')
+
+    retry = FailedImportsRetry(Config(), Client(), None, None, Jobs(),
+                               state_path=str(tmp_path / 'state.json'))
+    report = retry.run()
+    assert report['queue_total'] == 3
+    assert report['failures'] == 2  # duplicate removed
+    assert len(report['unsupported']) == 1
+    assert report['albums'][0]['status'] == 'dry-run'
+    assert report['albums'][0]['sent'] == 1
+    # target path rendered from Lidarr naming template, not torrent title
+    assert not hasattr(retry, '_last_payload')
+
+
+def test_failed_imports_apply_verifies_and_records_state(tmp_path, monkeypatch):
+    from extend.failed_imports import FailedImportsRetry
+
+    queue, album, tracks = _failed_imports_fixtures()
+    calls = {}
+
+    class Client:
+        def get_all_queue_records(self, page_size=200):
+            return queue
+
+        def get_naming_config(self):
+            return {'standardTrackFormat': '{track:00} - {Track Title}'}
+
+        def get_album(self, aid):
+            return album
+
+        def get_album_tracks(self, aid):
+            return tracks
+
+        def post_command(self, name, **body):
+            calls['command'] = (name, body)
+            return {'id': 77}
+
+        def get_command(self, cid):
+            return {'status': 'completed'}
+
+    class Config:
+        def get_config(self):
+            return {'output_format': 'mp3', 'lidarr_path_mapping': {}}
+
+    class Jobs:
+        def __init__(self):
+            self.payload = None
+
+        def enqueue(self, kind, payload):
+            self.payload = payload
+            return {'id': 'job-1'}, False
+
+        def get_job(self, jid):
+            return {'id': jid, 'status': 'succeeded',
+                    'result': {'successful': 1, 'failed': 0}}
+
+    jobs = Jobs()
+    retry = FailedImportsRetry(Config(), Client(), None, None, jobs,
+                               state_path=str(tmp_path / 'state.json'))
+    monkeypatch.setattr('os.path.exists', lambda p: True)
+    monkeypatch.setattr(retry, '_ffprobe', lambda p: {
+        'format': {'duration': '300.12', 'tags': {
+            'title': 'Swoon', 'artist': 'The Ocean',
+            'album_artist': 'The Ocean', 'album': 'Aeolian',
+            'track': '8/11', 'disc': '1/1', 'date': '2026'}}})
+
+    report = retry.run(apply=True)
+    assert report['albums'][0]['status'] == 'succeeded'
+    assert jobs.payload['tracks'][0]['duration'] == 300120
+    name, body = calls['command']
+    assert name == 'ManualImport'
+    assert body['files'][0]['trackIds'] == [101]
+    assert body['files'][0]['albumReleaseId'] == 99
+    assert body['importMode'] == 2
+    state = json.loads((tmp_path / 'state.json').read_text(encoding='utf-8'))
+    assert '10' in state
+
+    # A second run must not re-send the album.
+    report2 = retry.run(apply=True)
+    assert report2['albums'][0]['status'] == 'skipped'
+    assert 'already recorded' in report2['albums'][0]['reason']
+
+
+def test_failed_imports_rejects_bad_duration(tmp_path):
+    from extend.failed_imports import FailedImportsRetry
+
+    assert FailedImportsRetry._duration_ok(300.12, 300120)
+    assert not FailedImportsRetry._duration_ok(7929, 452000)
+    assert not FailedImportsRetry._duration_ok(None, 300120)
+    tags = {'title': 'T', 'artist': 'A', 'album_artist': 'A',
+            'album': 'B', 'track': '1', 'disc': '1', 'date': '2026'}
+    assert FailedImportsRetry._tags_ok(tags)
+    assert not FailedImportsRetry._tags_ok({k: v for k, v in tags.items()
+                                            if k != 'date'})
+    assert FailedImportsRetry._tags_ok(
+        {k: v for k, v in tags.items() if k != 'date'}, require_date=False)
+
+
+def test_failed_imports_reset_clears_state(tmp_path):
+    from extend.failed_imports import FailedImportsRetry
+
+    state = tmp_path / 'state.json'
+    state.write_text('{"10": {}}', encoding='utf-8')
+    retry = FailedImportsRetry(None, None, None, None, None, state_path=str(state))
+    report = retry.run(reset=True)
+    assert report['reset'] is True
+    assert not state.exists()

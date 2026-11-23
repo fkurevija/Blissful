@@ -196,6 +196,7 @@ Comprehensive documentation is available in the **Docs** tab of the web interfac
 - **⚙️ Configuration** - Advanced settings and options
 - **🎵 Request System** - Setting up user requests
 - **🔧 Troubleshooting** - Common issues and solutions
+- **🔁 Failed Imports** - Native, dry-run-by-default recovery of Lidarr failed imports
 
 ---
 

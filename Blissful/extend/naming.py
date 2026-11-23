@@ -135,12 +135,21 @@ def _build_values(context: Dict[str, Any]) -> Dict[str, str]:
                    'albumName', 'album_name')
     title = _first(context, 'title', 'Track Title', 'track title', 'trackName')
 
-    track = _to_int(_first(context, 'track', 'trackNumber', 'track_number',
-                           'Track', default=0), 0)
-    disc = _to_int(_first(context, 'disc', 'discNumber', 'disc_number',
-                          'mediumNumber', 'Disc', default=1), 1)
-    if disc < 0:
-        disc = 0
+    raw_track = _first(context, 'track', 'trackNumber', 'track_number',
+                       'Track', default=0)
+    raw_disc = _first(context, 'disc', 'discNumber', 'disc_number',
+                      'mediumNumber', 'Medium', default=1)
+    # Vinyl positions (A1, B6) must survive verbatim, not become 00.
+    track_is_numeric = str(raw_track).strip().isdigit()
+    disc_is_numeric = str(raw_disc).strip().isdigit()
+    track_num = int(raw_track) if track_is_numeric else 0
+    disc_num = int(raw_disc) if disc_is_numeric else 1
+    track_text = f'{track_num:02d}' if track_is_numeric else str(raw_track).strip()
+    disc_text = f'{disc_num:02d}' if disc_is_numeric else str(raw_disc).strip()
+    if disc_num < 0:
+        disc_num = 0
+    medium_format = _first(context, 'mediumFormat', 'medium_format',
+                           'Medium Format', default='')
 
     year = _year_value(_first(context, 'year', 'release_year', 'releaseYear',
                               'Release Year', 'releaseDate'))
@@ -157,10 +166,12 @@ def _build_values(context: Dict[str, Any]) -> Dict[str, str]:
         'album title': str(album),
         'title': str(title),
         'track title': str(title),
-        'track': str(track),
-        'disc': str(disc),
-        'track:00': f'{track:02d}',
-        'disc:00': f'{disc:02d}',
+        'track': str(track_num) if track_is_numeric else track_text,
+        'disc': str(disc_num) if disc_is_numeric else disc_text,
+        'track:00': track_text,
+        'disc:00': disc_text,
+        'medium:00': disc_text,
+        'medium format': str(medium_format),
         'year': year,
         'release year': release_year,
     }
@@ -169,6 +180,10 @@ def _build_values(context: Dict[str, Any]) -> Dict[str, str]:
 
 def _has_disc_token(fmt: str) -> bool:
     return any('disc' in token.lower() for token in _TOKEN_RE.findall(fmt))
+
+
+def _has_medium_token(fmt: str) -> bool:
+    return any('medium' in token.lower() for token in _TOKEN_RE.findall(fmt))
 
 
 def render_track_filename(fmt: str, context: Dict[str, Any],
@@ -200,8 +215,10 @@ def render_track_filename(fmt: str, context: Dict[str, Any],
         Rendered filename stem
     """
     context = context or {}
-    disc = _to_int(_first(context, 'disc', 'discNumber', 'disc_number',
-                          'mediumNumber', 'Disc', default=1), 1)
+    disc_raw = _first(context, 'disc', 'discNumber', 'disc_number',
+                      'mediumNumber', 'Disc', default=1)
+    disc_num = int(disc_raw) if str(disc_raw).strip().isdigit() else _to_int(disc_raw, 1)
+    disc = disc_num
     if not fmt:
         fmt = (DEFAULT_MULTI_DISC_TRACK_FORMAT if disc > 1
                else DEFAULT_TRACK_FORMAT)
@@ -223,8 +240,13 @@ def render_track_filename(fmt: str, context: Dict[str, Any],
 
     result = _TOKEN_RE.sub(substitute, fmt)
 
-    if disc > 1 and not _has_disc_token(fmt):
-        result = f'{disc:02d} {result}'
+    # A missing year must not leave an empty "()" in the folder name.
+    result = re.sub(r'\(\s*\)', '', result)
+    result = re.sub(r'\s+/', '/', result)
+    result = re.sub(r'\s{2,}', ' ', result).strip()
+
+    if disc_num > 1 and not _has_disc_token(fmt) and not _has_medium_token(fmt):
+        result = f'{disc_num:02d} {result}'
 
     cleaner = sanitize or sanitizer or context.get('sanitize') or context.get('sanitizer')
     if callable(cleaner):

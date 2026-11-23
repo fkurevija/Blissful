@@ -58,6 +58,7 @@ A powerful microservice that automatically downloads missing music tracks for yo
 - 👥 **Request System** - Let users request artists via Jellyfin/Emby/Plex authentication
 - 🎛️ **Audio Processing** - Normalization, format conversion, metadata embedding
 - 🗺️ **Path Mapping** - Support for remote/Docker Lidarr instances
+- 🔁 **Failed Import Recovery** - Retry unhealthy Lidarr imports with native duration/tag verification
 - 🔍 **Source Priorities** - Configure preferred download sources
 
 ---
@@ -202,6 +203,7 @@ Comprehensive documentation is available in the **Docs** tab of the web interfac
 - **⚙️ Configuration** - Advanced settings and options
 - **🎵 Request System** - Setting up user requests
 - **🔧 Troubleshooting** - Common issues and solutions
+- **🔁 Failed Imports** - Native, dry-run-by-default recovery of Lidarr failed imports
 
 ---
 
@@ -246,6 +248,7 @@ Blissful/
 │   ├── js/
 │   └── lidarr-userscript.user.js
 ├── docs/                # Documentation
+│   └── failed-imports.md  # Native Lidarr failed-import recovery
 ├── downloads/           # Download directory
 └── config.json         # Configuration file
 ```

@@ -361,6 +361,8 @@ export LIDARR_API_KEY=your-key
 | `YT_DLP_HOME` | `/app/downloads` | Persistent runtime dir (Deno, `pylib`, `yt-dlp.conf`) |
 | `DENO_PATH` | `/usr/local/bin/deno` | Deno location baked into the repo image; the published-image bootstrap uses `/app/downloads/deno` |
 | `POT_PROVIDER_URL` | `http://blissful-pot:4416` | In-network PO-token sidecar URL (no host port) |
+| `FAILED_IMPORTS_STATE` | `/app/downloads/failed-imports-state.json` | State file for native failed-import recovery |
+| `FAILED_IMPORTS_HOST_PREFIX` | _(unset)_ | Host prefix for file checks, e.g. `/mnt/Storage/Music` |
 
 #### **YouTube / YouTube Music 403 configuration**
 
