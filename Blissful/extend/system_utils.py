@@ -199,7 +199,9 @@ class SystemUtils:
             logger.info(f"Microservice URL: {server_url}")
             
             # Read userscript template
-            with open('static/lidarr-userscript.user.js', 'r', encoding='utf-8') as f:
+            script_path = (Path(__file__).resolve().parents[1] / 'static' /
+                           'lidarr-userscript.user.js')
+            with open(script_path, 'r', encoding='utf-8') as f:
                 script_content = f.read()
             
             # Generate @match patterns based on Lidarr URL

@@ -363,6 +363,8 @@ export LIDARR_API_KEY=your-key
 | `POT_PROVIDER_URL` | `http://blissful-pot:4416` | In-network PO-token sidecar URL (no host port) |
 | `FAILED_IMPORTS_STATE` | `/app/downloads/failed-imports-state.json` | State file for native failed-import recovery |
 | `FAILED_IMPORTS_HOST_PREFIX` | _(unset)_ | Host prefix for file checks, e.g. `/mnt/Storage/Music` |
+| `WANTED_SEARCH_ENABLED` | `false` | Enables the Wanted tab search endpoints |
+| `STALE_CLEANUP_ENABLED` | `false` | Enables the scheduled stale-torrent cleanup worker |
 
 #### **YouTube / YouTube Music 403 configuration**
 

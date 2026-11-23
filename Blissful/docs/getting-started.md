@@ -286,6 +286,24 @@ Allow users to request artists:
 
 ---
 
+## 🔎 Wanted Search & Failed Imports
+
+The **Wanted** tab can search Lidarr's missing albums directly (select specific
+albums or search all) and clean up stale torrents after a replacement is
+imported. Both actions default to **dry run** — tick *Apply* to actually queue
+searches or remove queue entries. Scheduled cleanup is off by default; enable it
+in that tab and set an interval. See [docs/wanted-search.md](wanted-search.md).
+
+To retry failed imports manually from inside the container:
+
+```bash
+python Blissful.py --retry-failed-imports              # preview
+python Blissful.py --retry-failed-imports --apply      # download + import
+python Blissful.py --wanted-search --json-only         # pure JSON for automation
+```
+
+State files under `/app/downloads` prevent re-sending the same albums.
+
 ## 🐛 Troubleshooting
 
 ### **Application Won't Start**

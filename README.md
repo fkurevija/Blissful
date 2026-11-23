@@ -291,6 +291,20 @@ Content-Type: application/json
 GET /api/health
 ```
 
+### Automation endpoints
+
+| Endpoint | Purpose |
+|----------|---------|
+| `GET /api/wanted` | Lidarr Wanted → Missing list (paginated server-side) |
+| `GET /api/stale-torrents` | Unhealthy/stale Activity Queue records |
+| `POST /api/wanted/search` | `{ "mode": "all"|"selected", "album_ids": [], "apply": false }` — dry-run by default |
+| `POST /api/stale-torrents/cleanup` | `{ "record_ids": [], "apply": false }` — deletes queue entries only after import is confirmed |
+| `GET /api/jobs` / `POST /api/jobs/<id>/retry` | Inspect and retry queued album downloads |
+| `GET /api/wanted/status` / `POST /api/wanted/reset` | Feature flags and state reset |
+
+For CLI automation use `--json-only` (or pipe the command): logs are suppressed
+so the combined output is a single JSON report.
+
 ---
 
 ## 🔧 Configuration File
