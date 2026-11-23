@@ -542,6 +542,7 @@ def test_config_has_wanted_search_defaults(tmp_path):
     assert cfg['stale_cleanup_enabled'] is False
     assert cfg['stale_cleanup_interval_hours'] == 6
     assert cfg['stale_cleanup_wait_minutes'] == 10
+    assert cfg['prefer_blissful_for_stale'] is True
 
 
 def test_lidarr_wanted_and_queue_delete(monkeypatch):
@@ -581,7 +582,8 @@ def test_lidarr_wanted_and_queue_delete(monkeypatch):
     assert calls[1][2] == {'deleteFiles': False, 'addImportExclusion': False}
 
 
-def _wanted_service(tmp_path, enabled=True, client=None):
+def _wanted_service(tmp_path, enabled=True, client=None, gapfill=None,
+                    prefer_gapfill=True):
     from extend.wanted_search import WantedSearchService
 
     class Config:
@@ -591,10 +593,12 @@ def _wanted_service(tmp_path, enabled=True, client=None):
                 'stale_cleanup_enabled': False,
                 'stale_cleanup_interval_hours': 6,
                 'stale_cleanup_wait_minutes': 10,
+                'prefer_blissful_for_stale': prefer_gapfill,
             }
 
     svc = WantedSearchService(Config(), client or object(),
-                              str(tmp_path / 'wanted-state.json'))
+                              str(tmp_path / 'wanted-state.json'),
+                              gapfill=gapfill)
     if client is not None:
         svc._client = client
     return svc
@@ -668,7 +672,12 @@ def test_stale_cleanup_deletes_only_after_import(tmp_path, monkeypatch):
             calls.append(('delete', rid, delete_files, add_import_exclusion))
             return {'success': True}
 
-    svc = _wanted_service(tmp_path, client=Client())
+    class Gapfill:
+        def gapfill_album(self, aid, apply=True, source=''):
+            calls.append(('gapfill', aid, apply, source))
+            return {'status': 'succeeded', 'imported': 1}
+
+    svc = _wanted_service(tmp_path, client=Client(), gapfill=Gapfill())
     stale = svc.get_stale()
     assert [record['id'] for record in stale] == [11]
 
@@ -679,7 +688,8 @@ def test_stale_cleanup_deletes_only_after_import(tmp_path, monkeypatch):
     applied = svc.cleanup_stale(apply=True, wait_minutes=1)
     assert applied['counts']['imported'] == 1
     assert applied['counts']['deleted'] == 1
-    assert calls[0] == ('search', 'AlbumSearch', {'albumIds': [10]})
+    assert calls[0] == ('gapfill', 10, True, 'stale-cleanup')
+    assert not any(c[0] == 'search' for c in calls)
     assert ('delete', 11, False, False) in calls
 
     again = svc.cleanup_stale(apply=True, wait_minutes=1)
@@ -791,3 +801,35 @@ def test_wanted_search_route_returns_409_when_busy():
         response = client.post('/api/wanted/search', json={'apply': False})
     assert response.status_code == 409
     assert response.get_json()['already_running'] is True
+
+
+def test_stale_cleanup_can_use_lidarr_search_when_flag_false(tmp_path, monkeypatch):
+    import extend.wanted_search as wanted_mod
+
+    monkeypatch.setattr(wanted_mod.time, 'sleep', lambda *a, **k: None)
+    calls = []
+
+    class Client:
+        def get_all_queue_records(self, page_size=200):
+            return [{'id': 11, 'albumId': 10, 'downloadId': 'd1',
+                     'title': 'Stalled',
+                     'errorMessage': 'The download is stalled with no connections'}]
+
+        def get_album_tracks(self, aid):
+            return [{'id': 1, 'hasFile': True}]
+
+        def post_command(self, name, **body):
+            calls.append((name, body))
+            return {'id': 77}
+
+        def get_command(self, cid):
+            return {'status': 'completed'}
+
+        def delete_queue_item(self, rid, **kwargs):
+            calls.append(('delete', rid))
+            return {'success': True}
+
+    svc = _wanted_service(tmp_path, client=Client(), prefer_gapfill=False)
+    report = svc.cleanup_stale(apply=True, wait_minutes=1)
+    assert calls[0] == ('AlbumSearch', {'albumIds': [10]})
+    assert report['counts']['deleted'] == 1

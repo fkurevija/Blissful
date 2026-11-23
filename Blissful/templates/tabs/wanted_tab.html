@@ -13,6 +13,10 @@
         <div class="form-group">
             <label><input type="checkbox" id="staleCleanupEnabled"> Enable scheduled stale-torrent cleanup</label>
         </div>
+        <div class="form-group">
+            <label><input type="checkbox" id="preferBlissfulForStale" checked> Use Blissful's yt-dlp gap-fill for stale items (instead of Lidarr search)</label>
+            <p class="help-text">On by default: stale items are stuck because Lidarr search failed, so Blissful downloads and links the missing tracks itself.</p>
+        </div>
         <div class="form-row">
             <div class="form-group">
                 <label for="staleCleanupInterval">Cleanup interval (hours)</label>

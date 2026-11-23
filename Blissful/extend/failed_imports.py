@@ -452,6 +452,193 @@ class FailedImportsRetry:
             time.sleep(_POLL_INTERVAL_S)
         return {'status': 'timeout', 'message': 'command poll timeout'}
 
+    # -------------------------------------------------------------- gap fill
+    def gapfill_album(self, aid, apply=True, state=None, naming_config=None,
+                      extension=None, source='failed-imports',
+                      respect_state=True):
+        """Run the full Blissful gap-fill for one album.
+
+        This is the shared engine behind ``--retry-failed-imports`` and stale
+        cleanup: download missing tracks, verify/tag/place them, then link with
+        ManualImport. Returns a per-album report entry and never raises.
+        """
+        entry = self._album_report(aid)
+        client = self._get_client()
+        if client is None:
+            entry.update(status='skipped', reason='Lidarr client unavailable')
+            return entry
+        if state is None:
+            state = self._load_state()
+        if respect_state and str(aid) in state:
+            entry.update(status='skipped', reason='already recorded in state',
+                         title=str(state.get(str(aid), {}).get('title') or ''))
+            return entry
+        if naming_config is None:
+            try:
+                naming_config = client.get_naming_config() or {}
+            except Exception:
+                naming_config = {}
+        if not extension:
+            extension = self._config().get('output_format', 'mp3') or 'mp3'
+
+        try:
+            album = client.get_album(aid)
+            if not album:
+                entry.update(status='skipped', reason='album not found')
+                return entry
+            title = str(album.get('title') or '')
+            entry['title'] = title
+            if not album.get('monitored'):
+                entry.update(status='skipped', reason='album is unmonitored')
+                return entry
+
+            artist_obj = album.get('artist') or {}
+            artist = str(artist_obj.get('artistName') or '')
+            artist_path = str(artist_obj.get('path') or '')
+            year = album.get('releaseYear') or album.get('year')
+
+            try:
+                tracks = client.get_album_tracks(aid) or []
+            except Exception:
+                tracks = []
+            missing = [t for t in tracks
+                       if isinstance(t, dict) and not t.get('hasFile')]
+            entry['missing'] = len(missing)
+            if not missing:
+                entry.update(status='skipped', reason='no missing tracks')
+                return entry
+
+            mediums = {t.get('mediumNumber', 1) for t in missing}
+            if len(mediums) > 1:
+                template = (naming_config.get('multiDiscTrackFormat')
+                            or naming_config.get('multiDiscFormat')
+                            or _DEFAULT_MULTI_FORMAT)
+            else:
+                template = (naming_config.get('standardTrackFormat')
+                            or naming_config.get('trackFormat')
+                            or _DEFAULT_STANDARD_FORMAT)
+
+            payload_tracks = self._build_entries(
+                missing, template, artist, title, year, artist_path, extension)
+            entry['sent'] = len(payload_tracks)
+            if not apply:
+                entry.update(status='dry-run', reason='dry run - nothing sent')
+                return entry
+
+            job_payload = {
+                'artist': artist,
+                'album': title,
+                'album_id': aid,
+                'tracks': payload_tracks,
+                'target_path': artist_path,
+                'source': source,
+            }
+            try:
+                job, _duplicate = self.job_manager.enqueue('album', job_payload)
+            except Exception as exc:
+                entry.update(status='failed',
+                             reason='enqueue error: %s' % str(exc)[:200])
+                return entry
+            job_id = (job or {}).get('id') if isinstance(job, dict) else None
+            if not job_id:
+                entry.update(status='failed',
+                             reason='enqueue returned no job id')
+                return entry
+
+            finished = self._poll_job(job_id)
+            if _lower(finished.get('status')) != 'succeeded':
+                reason = (finished.get('failure_reason')
+                          or finished.get('message')
+                          or 'download job did not succeed')
+                entry.update(status='failed', reason=str(reason)[:200])
+                return entry
+
+            release_id = self._monitored_release_id(album, tracks)
+            if not release_id:
+                entry.update(status='failed',
+                             reason='no monitored release to link into')
+                return entry
+
+            accepted = []
+            rejected = []
+            for payload_track in payload_tracks:
+                track_title = str(payload_track.get('title') or '')
+                lidarr_path = payload_track.get('target_path') or ''
+                host_path = self._host_path(lidarr_path)
+                if not os.path.exists(host_path):
+                    rejected.append((track_title, 'file not found'))
+                    continue
+                info = self._ffprobe(host_path) or {}
+                fmt = info.get('format') or {}
+                raw_duration = fmt.get('duration')
+                try:
+                    actual = (float(raw_duration)
+                              if raw_duration not in (None, '') else None)
+                except (TypeError, ValueError):
+                    actual = None
+                if not self._duration_ok(actual, payload_track.get('duration')):
+                    rejected.append((track_title, 'duration outside 10% tolerance'))
+                    self._delete_file(host_path)
+                    continue
+                if not self._tags_ok(fmt.get('tags'), require_date=bool(year)):
+                    rejected.append((track_title, 'missing required tags'))
+                    self._delete_file(host_path)
+                    continue
+                accepted.append(payload_track)
+
+            entry['imported'] = 0
+            if not accepted:
+                reason = 'all files rejected: ' + '; '.join(
+                    '%s (%s)' % (t[:30], why) for t, why in rejected[:5])
+                entry.update(status='failed', reason=reason[:300])
+                return entry
+
+            artist_id = artist_obj.get('id') or album.get('artistId')
+            files = [{
+                'path': item.get('target_path'),
+                'artistId': artist_id,
+                'albumId': aid,
+                'albumReleaseId': release_id,
+                'trackIds': item.get('trackIds') or [item.get('trackId')],
+                'quality': {'id': 28, 'name': 'MP3-320'},
+                'downloadId': '',
+                'disableReleaseSwitching': True,
+            } for item in accepted]
+            try:
+                response = client.post_command(
+                    'ManualImport', files=files, importMode=2,
+                    replaceExistingFiles=False)
+            except Exception as exc:
+                entry.update(status='failed',
+                             reason='ManualImport error: %s' % str(exc)[:200])
+                return entry
+            command_id = ((response or {}).get('id')
+                          if isinstance(response, dict) else None)
+            if not command_id:
+                entry.update(status='failed',
+                             reason='ManualImport returned no command id')
+                return entry
+            command_result = self._poll_command(command_id)
+            if _lower(command_result.get('status')) != 'completed':
+                reason = (command_result.get('message')
+                          or 'ManualImport did not complete')
+                entry.update(status='failed', reason=str(reason)[:200])
+                return entry
+
+            entry['imported'] = len(files)
+            entry.update(status='succeeded', reason='')
+            state[str(aid)] = {
+                'timestamp': time.strftime('%Y-%m-%dT%H:%M:%S'),
+                'title': title,
+                'sent': len(payload_tracks),
+                'imported': len(files),
+                'status': 'succeeded',
+            }
+            self._save_state(state)
+        except Exception as exc:
+            entry.update(status='failed', reason=str(exc)[:200])
+        return entry
+
     # --------------------------------------------------------------------- run
     def run(self, album_id=None, apply=False, reset=False) -> dict:
         """Select failed imports, optionally re-download and re-import them.
@@ -545,195 +732,9 @@ class FailedImportsRetry:
             naming_config = {}
         extension = cfg.get('output_format', 'mp3') or 'mp3'
 
-        for aid, _items in by_album.items():
-            title = ''
-            entry = self._album_report(aid)
-            try:
-                if str(aid) in state:
-                    entry.update(status='skipped',
-                                 reason='already recorded in state',
-                                 title=str(state.get(str(aid), {}).get('title') or ''))
-                    report['albums'].append(entry)
-                    continue
-
-                album = client.get_album(aid)
-                if not album:
-                    entry.update(status='skipped', reason='album not found')
-                    report['albums'].append(entry)
-                    continue
-                title = str(album.get('title') or '')
-                entry['title'] = title
-                if not album.get('monitored'):
-                    entry.update(status='skipped', reason='album is unmonitored')
-                    report['albums'].append(entry)
-                    continue
-
-                artist_obj = album.get('artist') or {}
-                artist = str(artist_obj.get('artistName') or '')
-                artist_path = str(artist_obj.get('path') or '')
-                year = album.get('releaseYear') or album.get('year')
-
-                try:
-                    tracks = client.get_album_tracks(aid) or []
-                except Exception:
-                    tracks = []
-                missing = [t for t in tracks
-                           if isinstance(t, dict) and not t.get('hasFile')]
-                entry['missing'] = len(missing)
-                if not missing:
-                    entry.update(status='skipped', reason='no missing tracks')
-                    report['albums'].append(entry)
-                    continue
-
-                mediums = {t.get('mediumNumber', 1) for t in missing}
-                if len(mediums) > 1:
-                    template = (naming_config.get('multiDiscTrackFormat')
-                                or naming_config.get('multiDiscFormat')
-                                or _DEFAULT_MULTI_FORMAT)
-                else:
-                    template = (naming_config.get('standardTrackFormat')
-                                or naming_config.get('trackFormat')
-                                or _DEFAULT_STANDARD_FORMAT)
-
-                payload_tracks = self._build_entries(
-                    missing, template, artist, title, year, artist_path,
-                    extension)
-                if not apply:
-                    entry.update(status='dry-run',
-                                 reason='dry run - nothing sent',
-                                 sent=len(payload_tracks))
-                    report['albums'].append(entry)
-                    continue
-
-                job_payload = {
-                    'artist': artist,
-                    'album': title,
-                    'album_id': aid,
-                    'tracks': payload_tracks,
-                    'target_path': artist_path,
-                    'source': 'failed-imports',
-                }
-                try:
-                    job, _duplicate = self.job_manager.enqueue('album',
-                                                               job_payload)
-                except Exception as exc:
-                    entry.update(status='failed',
-                                 reason='enqueue error: %s' % str(exc)[:200])
-                    report['albums'].append(entry)
-                    continue
-                job_id = (job or {}).get('id') if isinstance(job, dict) else None
-                if not job_id:
-                    entry.update(status='failed',
-                                 reason='enqueue returned no job id')
-                    report['albums'].append(entry)
-                    continue
-
-                finished = self._poll_job(job_id)
-                if _lower(finished.get('status')) != 'succeeded':
-                    reason = (finished.get('failure_reason')
-                              or finished.get('message')
-                              or 'download job did not succeed')
-                    entry.update(status='failed',
-                                 reason=str(reason)[:200])
-                    report['albums'].append(entry)
-                    continue
-
-                release_id = self._monitored_release_id(album, tracks)
-                if not release_id:
-                    entry.update(status='failed',
-                                 reason='no monitored release to link into')
-                    report['albums'].append(entry)
-                    continue
-
-                accepted = []
-                rejected = []
-                for payload_track in payload_tracks:
-                    track_title = str(payload_track.get('title') or '')
-                    lidarr_path = payload_track.get('target_path') or ''
-                    host_path = self._host_path(lidarr_path)
-                    if not os.path.exists(host_path):
-                        rejected.append((track_title, 'file not found'))
-                        continue
-                    info = self._ffprobe(host_path) or {}
-                    fmt = info.get('format') or {}
-                    raw_duration = fmt.get('duration')
-                    try:
-                        actual = (float(raw_duration)
-                                  if raw_duration not in (None, '') else None)
-                    except (TypeError, ValueError):
-                        actual = None
-                    if not self._duration_ok(actual,
-                                             payload_track.get('duration')):
-                        rejected.append(
-                            (track_title,
-                             'duration %.0fs outside 10%% of expected' % actual))
-                        self._delete_file(host_path)
-                        continue
-                    if not self._tags_ok(fmt.get('tags'),
-                                         require_date=bool(year)):
-                        rejected.append((track_title, 'missing required tags'))
-                        self._delete_file(host_path)
-                        continue
-                    accepted.append(payload_track)
-
-                entry['sent'] = len(payload_tracks)
-                entry['imported'] = 0
-                if not accepted:
-                    reason = 'all files rejected: ' + '; '.join(
-                        '%s (%s)' % (t[:30], why) for t, why in rejected[:5])
-                    entry.update(status='failed', reason=reason[:300])
-                    report['albums'].append(entry)
-                    continue
-
-                artist_id = (artist_obj.get('id') or album.get('artistId'))
-                files = [{
-                    'path': item.get('target_path'),
-                    'artistId': artist_id,
-                    'albumId': aid,
-                    'albumReleaseId': release_id,
-                    'trackIds': item.get('trackIds') or [item.get('trackId')],
-                    'quality': {'id': 28, 'name': 'MP3-320'},
-                    'downloadId': '',
-                    'disableReleaseSwitching': True,
-                } for item in accepted]
-
-                try:
-                    response = client.post_command(
-                        'ManualImport', files=files, importMode=2,
-                        replaceExistingFiles=False)
-                except Exception as exc:
-                    entry.update(status='failed',
-                                 reason='ManualImport error: %s' % str(exc)[:200])
-                    report['albums'].append(entry)
-                    continue
-                command_id = (response or {}).get('id') if isinstance(response, dict) else None
-                if not command_id:
-                    entry.update(status='failed',
-                                 reason='ManualImport returned no command id')
-                    report['albums'].append(entry)
-                    continue
-
-                command_result = self._poll_command(command_id)
-                if _lower(command_result.get('status')) != 'completed':
-                    reason = (command_result.get('message')
-                              or 'ManualImport did not complete')
-                    entry.update(status='failed', reason=str(reason)[:200])
-                    report['albums'].append(entry)
-                    continue
-
-                entry['imported'] = len(files)
-                entry.update(status='succeeded', reason='')
-                state[str(aid)] = {
-                    'timestamp': time.strftime('%Y-%m-%dT%H:%M:%S'),
-                    'title': title,
-                    'sent': len(payload_tracks),
-                    'imported': len(files),
-                    'status': 'succeeded',
-                }
-                self._save_state(state)
-            except Exception as exc:
-                # Never let one bad album abort the whole run.
-                entry.update(status='failed', reason=str(exc)[:200])
-            report['albums'].append(entry)
+        for aid in by_album:
+            report['albums'].append(self.gapfill_album(
+                aid, apply=apply, state=state, naming_config=naming_config,
+                extension=extension, source='failed-imports'))
 
         return report

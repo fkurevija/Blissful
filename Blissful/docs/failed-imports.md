@@ -26,6 +26,10 @@ or direct access to Lidarr's SQLite database is needed.
 Run inside the Blissful container (or from the app directory with Lidarr
 configured in `config.json` / `LIDARR_URL` + `LIDARR_API_KEY`):
 
+Inside the container, do **not** pass `--host-prefix /mnt/Storage/Music` —
+Lidarr paths are already container-native (`/media/Music`) and that override
+makes every file look missing.
+
 ```bash
 # See what would be attempted (safe)
 python Blissful.py --retry-failed-imports

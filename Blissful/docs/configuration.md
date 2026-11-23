@@ -365,6 +365,7 @@ export LIDARR_API_KEY=your-key
 | `FAILED_IMPORTS_HOST_PREFIX` | _(unset)_ | Host prefix for file checks, e.g. `/mnt/Storage/Music` |
 | `WANTED_SEARCH_ENABLED` | `false` | Enables the Wanted tab search endpoints |
 | `STALE_CLEANUP_ENABLED` | `false` | Enables the scheduled stale-torrent cleanup worker |
+| `PREFER_BLISSFUL_FOR_STALE` | `true` | Use Blissful's gap-fill instead of Lidarr `AlbumSearch` for stale items |
 
 #### **YouTube / YouTube Music 403 configuration**
 

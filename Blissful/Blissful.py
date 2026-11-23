@@ -30,6 +30,7 @@ from extend.spotify_client import SpotifyClient
 from extend.auth import install_auth, is_enabled
 from extend.job_manager import JobManager
 from extend.wanted_search import WantedSearchService
+from extend.failed_imports import FailedImportsRetry
 from extend.routes import register_routes
 
 def parse_args(argv=None):
@@ -102,7 +103,10 @@ track_manager = TrackManager(config_manager, LidarrClient, download_manager, aud
 sources_api = SourcesAPI(source_manager)
 system_utils = SystemUtils(config_manager)
 job_manager = JobManager(config_manager, album_manager)
-wanted_search = WantedSearchService(config_manager, LidarrClient)
+failed_imports = FailedImportsRetry(config_manager, LidarrClient,
+                                    download_manager, album_manager, job_manager)
+wanted_search = WantedSearchService(config_manager, LidarrClient,
+                                    gapfill=failed_imports)
 
 logger.info("✅ All modular managers initialized")
 

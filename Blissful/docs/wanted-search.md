@@ -14,6 +14,10 @@ is active (including runs started by the scheduler or another tab).
 - **Enable scheduled stale-torrent cleanup** — off by default. When on, Blissful
   periodically searches stale torrents and removes each queue entry only after
   Lidarr reports its album fully imported.
+- **Use Blissful's yt-dlp gap-fill** — on by default (`prefer_blissful_for_stale`).
+  Stale torrents are stuck *because* Lidarr search failed, so cleanup uses the same
+  download → tag → place → `ManualImport` engine as `--retry-failed-imports`.
+  Turn it off to restore the older `AlbumSearch` flow.
 - **Cleanup interval (hours)** — default 6; **Import wait per album (minutes)** —
   default 10. Changes to the interval are picked up on restart.
 
@@ -43,8 +47,9 @@ With *Apply* checked, for each selected stale item Blissful:
    `addImportExclusion=false`, and records the album in state so it is never
    re-searched.
 
-If the import does not complete in time, the queue entry is **kept** and no
-state is recorded. Nothing is deleted from disk by this feature.
+If the gap-fill or import does not complete, the queue entry is **kept** with
+the reported reason and the run continues to the next album. Nothing is deleted
+from disk by this feature.
 
 ## CLI equivalents
 

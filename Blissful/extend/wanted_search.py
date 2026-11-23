@@ -89,10 +89,12 @@ class WantedSearchService:
     """Search wanted albums and clean up stale torrents in Lidarr's queue."""
 
     def __init__(self, config_manager, lidarr_client_class,
-                 state_path='/app/downloads/wanted-search-state.json'):
+                 state_path='/app/downloads/wanted-search-state.json',
+                 gapfill=None):
         self.config_manager = config_manager
         self.lidarr_client_class = lidarr_client_class
         self.state_path = Path(state_path)
+        self.gapfill = gapfill
         self._client = None
         self._stop_event = None
         self._scheduler_thread = None
@@ -101,6 +103,22 @@ class WantedSearchService:
         self._last_activity = None
         self._active_lock = threading.Lock()
         self._run_lock = threading.Lock()
+
+    # ------------------------------------------------------------ gap fill
+    def _prefer_gapfill(self):
+        return self._config().get('prefer_blissful_for_stale', True) is not False
+
+    def _gapfill_album(self, album_id, apply=True):
+        """Hand an album to Blissful's own download/tag/link engine."""
+        if self.gapfill is None:
+            return {'status': 'failed',
+                    'reason': 'Blissful gap-fill engine unavailable'}
+        engine = getattr(self.gapfill, 'gapfill_album', None)
+        if callable(engine):
+            return engine(album_id, apply=apply, source='stale-cleanup')
+        if callable(self.gapfill):
+            return self.gapfill(album_id, apply=apply)
+        return {'status': 'failed', 'reason': 'Blissful gap-fill engine unavailable'}
 
     # --------------------------------------------------------- single flight
     def _busy_report(self):
@@ -601,50 +619,79 @@ class WantedSearchService:
                     })
                     continue
 
-                try:
-                    response = client.post_command('AlbumSearch',
-                                                   albumIds=[int(album_id)])
-                except Exception as exc:
-                    report['errors'].append(self._safe_error(exc))
-                    report['skipped'].append({'album': album_id,
-                                              'reason': 'AlbumSearch failed'})
-                    continue
-                command_id = ((response or {}).get('id')
-                              if isinstance(response, dict) else None)
-                if not command_id:
-                    report['errors'].append(
-                        'AlbumSearch returned no command id for album %s' % album_id)
-                    report['skipped'].append({'album': album_id,
-                                              'reason': 'no command id'})
-                    continue
-                report['searched'].append({
-                    'album': album_id,
-                    'title': title,
-                    'baseline_missing': baseline_missing,
-                    'command_id': command_id,
-                })
-                self._set_active(phase='waiting for import', album=album_id,
-                                 searched=len(report['searched']))
+                if self._prefer_gapfill():
+                    # Stale items are stuck precisely because Lidarr search
+                    # failed; use Blissful's own yt-dlp bridge instead.
+                    self._set_active(phase='gap-filling with Blissful',
+                                     album=album_id,
+                                     searched=len(report['searched']))
+                    try:
+                        gap = self._gapfill_album(album_id, apply=True) or {}
+                    except Exception as exc:
+                        gap = {'status': 'failed', 'reason': self._safe_error(exc)}
+                    status = _lower(str(gap.get('status') or ''))
+                    report['searched'].append({
+                        'album': album_id,
+                        'title': title,
+                        'baseline_missing': baseline_missing,
+                        'engine': 'blissful',
+                        'status': status,
+                        'reason': str(gap.get('reason') or '')[:200],
+                    })
+                    if status not in ('succeeded', 'success'):
+                        reason = str(gap.get('reason') or 'gap-fill did not succeed')
+                        report['errors'].append(reason[:300])
+                        report['skipped'].append({'album': album_id,
+                                                  'reason': reason[:200]})
+                        report['kept'].extend(record.get('id') for record in records)
+                        continue
+                else:
+                    try:
+                        response = client.post_command('AlbumSearch',
+                                                       albumIds=[int(album_id)])
+                    except Exception as exc:
+                        report['errors'].append(self._safe_error(exc))
+                        report['skipped'].append({'album': album_id,
+                                                  'reason': 'AlbumSearch failed'})
+                        continue
+                    command_id = ((response or {}).get('id')
+                                  if isinstance(response, dict) else None)
+                    if not command_id:
+                        report['errors'].append(
+                            'AlbumSearch returned no command id for album %s' % album_id)
+                        report['skipped'].append({'album': album_id,
+                                                  'reason': 'no command id'})
+                        continue
+                    report['searched'].append({
+                        'album': album_id,
+                        'title': title,
+                        'baseline_missing': baseline_missing,
+                        'engine': 'lidarr',
+                        'command_id': command_id,
+                    })
+                    self._set_active(phase='waiting for import', album=album_id,
+                                     searched=len(report['searched']))
 
-                command = self._poll_command(client, command_id)
-                status = _lower(command.get('status'))
-                if status and status not in _COMMAND_OK:
-                    report['errors'].append(
-                        'AlbumSearch command %s status %s' % (command_id, status))
-                    report['kept'].extend(record.get('id') for record in records)
-                    continue
+                    command = self._poll_command(client, command_id)
+                    status = _lower(command.get('status'))
+                    if status and status not in _COMMAND_OK:
+                        report['errors'].append(
+                            'AlbumSearch command %s status %s' % (command_id, status))
+                        report['kept'].extend(record.get('id') for record in records)
+                        continue
 
-                imported, error = self._wait_for_import(client, album_id, wait_s)
-                if not imported:
-                    if error:
-                        report['errors'].append(error)
-                    report['kept'].extend(record.get('id') for record in records)
-                    continue
+                    imported, error = self._wait_for_import(client, album_id, wait_s)
+                    if not imported:
+                        if error:
+                            report['errors'].append(error)
+                        report['kept'].extend(record.get('id') for record in records)
+                        continue
 
                 report['imported'].append({
                     'album': album_id,
                     'title': title,
                     'baseline_missing': baseline_missing,
+                    'engine': 'blissful' if self._prefer_gapfill() else 'lidarr',
                 })
                 self._set_active(phase='removing stale queue entry',
                                  imported=len(report['imported']))

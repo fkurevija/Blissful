@@ -175,6 +175,7 @@ async function loadWantedSettings() {
         document.getElementById('staleCleanupEnabled').checked = !!status.stale_cleanup_enabled;
         document.getElementById('staleCleanupInterval').value = status.stale_cleanup_interval_hours || 6;
         document.getElementById('staleCleanupWait').value = status.stale_cleanup_wait_minutes || 10;
+        document.getElementById('preferBlissfulForStale').checked = status.prefer_blissful_for_stale !== false;
         applyWantedBusy(status.active);
     } catch (error) {
         showNotification(`Could not load wanted settings: ${error.message}`, 'error');
@@ -186,7 +187,8 @@ async function saveWantedSettings() {
         wanted_search_enabled: document.getElementById('wantedSearchEnabled').checked,
         stale_cleanup_enabled: document.getElementById('staleCleanupEnabled').checked,
         stale_cleanup_interval_hours: parseInt(document.getElementById('staleCleanupInterval').value, 10) || 6,
-        stale_cleanup_wait_minutes: parseInt(document.getElementById('staleCleanupWait').value, 10) || 10
+        stale_cleanup_wait_minutes: parseInt(document.getElementById('staleCleanupWait').value, 10) || 10,
+        prefer_blissful_for_stale: document.getElementById('preferBlissfulForStale').checked
     };
     try {
         await wantedApi('/api/config', { method: 'POST', body: JSON.stringify(payload) });
