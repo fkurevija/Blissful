@@ -5,7 +5,7 @@ A powerful microservice that automatically downloads missing music tracks for yo
 ![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)
 ![Python](https://img.shields.io/badge/python-3.8+-green.svg)
 ![License](https://img.shields.io/badge/license-Unlicense-blue.svg)
-![Docker](https://img.shields.io/badge/docker-angablade%2Fblissful-blue?logo=docker)
+![Docker](https://img.shields.io/badge/docker-build%20from%20source-blue?logo=docker)
 
 ---
 
@@ -18,7 +18,7 @@ YouTube and YouTube Music regularly return **HTTP 403** to a bare yt-dlp install
 
 **Building from this repository fixes both automatically.** The Dockerfile bakes in Deno 2.x, `yt-dlp>=2026.10.26` and `bgutil-ytdlp-pot-provider>=2.0.2`; `yt-dlp.conf` points at `/usr/local/bin/deno` and `http://blissful-pot:4416`; and `docker-compose.yml` starts the sidecar on the **same Docker network** with no published host port. Just `docker compose up -d --build` — no manual patching, no bind-mounting a patched Python file.
 
-**Using the published image (`angablade/blissful:latest`)?** Bootstrap the runtime once into your persistent downloads directory:
+**Using an image built from an older release rather than this fork?** Bootstrap the runtime once into your persistent downloads directory:
 
 ```bash
 docker cp scripts/setup-ytdlp-runtime.sh blissful:/tmp/setup-ytdlp-runtime.sh
@@ -104,8 +104,8 @@ curl -s http://localhost:7373/api/health
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/angablade/blissful.git
-cd blissful
+git clone https://github.com/fkurevija/Blissful.git
+cd Blissful
 
 # 2. Install dependencies
 pip install -r requirements.txt
@@ -163,8 +163,8 @@ the `blissful-pot` PO-token sidecar on the same network. This is what fixes
 YouTube **and** YouTube Music 403s automatically.
 
 ```bash
-git clone https://github.com/angablade/blissful.git
-cd blissful/Blissful
+git clone https://github.com/fkurevija/Blissful.git
+cd Blissful/Blissful
 
 # Build from the repo (default) and start both containers
 docker compose up -d --build
@@ -174,7 +174,7 @@ docker compose logs -f blissful
 docker compose logs -f blissful-pot
 ```
 
-The compose file also includes a commented `image: angablade/blissful:latest`
+The compose file also includes a commented `image:` line for an image you have published from this fork
 option if you prefer the published image.
 
 ### Using the published image
@@ -198,8 +198,8 @@ The script is safe to re-run: it skips steps already completed and honours
 ### Build from Source (Optional)
 
 ```bash
-git clone https://github.com/angablade/blissful.git
-cd blissful/Blissful
+git clone https://github.com/fkurevija/Blissful.git
+cd Blissful/Blissful
 
 # The Dockerfile installs ffmpeg, curl/unzip, Deno 2.x, yt-dlp and the
 # PO-token provider, and runs as PUID:PGID (default 1000:1000).
@@ -372,8 +372,8 @@ Contributions are welcome! Here's how you can help:
 
 ## 🙏 Credits
 
-**Created by:** [Angablade](https://github.com/angablade)  
-**Documentation by:** Synthia (Angablade's personal AI assistant)
+**Maintained by:** [fkurevija](https://github.com/fkurevija)<br>
+**Documentation:** this fork's `docs/` directory
 
 ### Built With:
 - [Flask](https://flask.palletsprojects.com/) - Web framework
@@ -388,8 +388,8 @@ Contributions are welcome! Here's how you can help:
 Need help?
 
 - 📖 **Documentation** - Check the Docs tab in the web interface
-- 🐛 **Bug Reports** - [Open an issue](https://github.com/angablade/blissful/issues)
-- 💬 **Discussions** - [GitHub Discussions](https://github.com/angablade/blissful/discussions)
+- 🐛 **Bug Reports** - [Open an issue](https://github.com/fkurevija/Blissful/issues)
+- 💬 **Questions** - [Open an issue in this fork](https://github.com/fkurevija/Blissful/issues)
 
 ---
 

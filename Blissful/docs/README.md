@@ -5,7 +5,7 @@ A powerful microservice that automatically downloads missing music tracks for yo
 ![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)
 ![Python](https://img.shields.io/badge/python-3.8+-green.svg)
 ![License](https://img.shields.io/badge/license-Unlicense-blue.svg)
-![Docker](https://img.shields.io/badge/docker-angablade%2Fblissful-blue?logo=docker)
+![Docker](https://img.shields.io/badge/docker-build%20from%20source-blue?logo=docker)
 
 ---
 
@@ -73,8 +73,8 @@ A powerful microservice that automatically downloads missing music tracks for yo
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/angablade/blissful.git
-cd blissful
+git clone https://github.com/fkurevija/Blissful.git
+cd Blissful
 
 # 2. Install dependencies
 pip install -r requirements.txt
@@ -127,16 +127,13 @@ The application will start on **http://localhost:7373**
 
 ### Quick Start with Docker (Recommended)
 
-**Official Docker Image:** `angablade/blissful:latest`
+**Build from this fork (recommended):** the included Compose file builds the
+image and starts the `blissful-pot` PO-token sidecar on the same network.
 
 ```bash
-# Pull and run the official image
-docker run -d \
-  --name blissful \
-  -p 7373:7373 \
-  -v $(pwd)/config.json:/app/config.json \
-  -v $(pwd)/downloads:/app/downloads \
-  angablade/blissful:latest
+git clone https://github.com/fkurevija/Blissful.git
+cd Blissful/Blissful
+docker compose up -d --build
 ```
 
 ### Docker Compose
@@ -145,16 +142,20 @@ docker run -d \
 # Download docker-compose.yml from the repository
 # Or use this configuration:
 
-version: '3.8'
 services:
   blissful:
-    image: angablade/blissful:latest
+    build: .
     container_name: blissful
     ports:
       - "7373:7373"
     volumes:
       - ./config.json:/app/config.json
       - ./downloads:/app/downloads
+      - ./yt-dlp.conf:/app/downloads/yt-dlp.conf:ro
+    restart: unless-stopped
+  blissful-pot:
+    image: brainicism/bgutil-ytdlp-pot-provider:latest
+    container_name: blissful-pot
     restart: unless-stopped
 
 # Start the container
@@ -168,8 +169,8 @@ docker-compose logs -f blissful
 
 ```bash
 # Clone and build locally
-git clone https://github.com/angablade/blissful.git
-cd blissful
+git clone https://github.com/fkurevija/Blissful.git
+cd Blissful
 
 # Build the image
 docker build -t blissful .
@@ -314,8 +315,8 @@ Contributions are welcome! Here's how you can help:
 
 ## 🙏 Credits
 
-**Created by:** [Angablade](https://github.com/angablade)  
-**Documentation by:** Synthia (Angablade's personal AI assistant)
+**Maintained by:** [fkurevija](https://github.com/fkurevija)<br>
+**Documentation:** this fork's `docs/` directory
 
 ### Built With:
 - [Flask](https://flask.palletsprojects.com/) - Web framework
@@ -330,8 +331,8 @@ Contributions are welcome! Here's how you can help:
 Need help?
 
 - 📖 **Documentation** - Check the Docs tab in the web interface
-- 🐛 **Bug Reports** - [Open an issue](https://github.com/angablade/blissful/issues)
-- 💬 **Discussions** - [GitHub Discussions](https://github.com/angablade/blissful/discussions)
+- 🐛 **Bug Reports** - [Open an issue](https://github.com/fkurevija/Blissful/issues)
+- 💬 **Questions** - [Open an issue in this fork](https://github.com/fkurevija/Blissful/issues)
 
 ---
 

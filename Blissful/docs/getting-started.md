@@ -32,7 +32,7 @@ Dockerfile installs Deno 2.x, `yt-dlp>=2026.10.26` and
 sidecar automatically. This fixes YouTube **and** YouTube Music 403s out of
 the box.
 
-**If you use the published image** (`angablade/blissful:latest`), bootstrap
+**If you use an image built from an older release rather than this fork**, bootstrap
 once after the container has started:
 
 ```bash
@@ -68,8 +68,8 @@ read-only at `/app/downloads/yt-dlp.conf`.
 
 ```bash
 # 1. Clone the repository
-git clone https://github.com/angablade/blissful.git
-cd blissful
+git clone https://github.com/fkurevija/Blissful.git
+cd Blissful
 
 # 2. Install Python dependencies
 pip install -r requirements.txt
@@ -88,8 +88,8 @@ python run.py
 **Default: build from the repository (self-contained, fixes 403s automatically):**
 
 ```bash
-git clone https://github.com/angablade/blissful.git
-cd blissful/Blissful
+git clone https://github.com/fkurevija/Blissful.git
+cd Blissful/Blissful
 
 # Build the image and start Blissful + the blissful-pot sidecar
 docker compose up -d --build
@@ -103,7 +103,7 @@ docker compose logs -f blissful-pot
 shared `blissful-network`, mounts `yt-dlp.conf` read-only, and maps the music
 library at `/media/Music`. The `blissful-pot` service publishes no host port.
 
-**Alternative: use the published image** `angablade/blissful:latest`:
+**Alternative: use an image you have published from this fork**:
 
 ```bash
 # In docker-compose.yml, comment out `build: .` and uncomment `image:`

@@ -1,6 +1,6 @@
 #!/bin/sh
 # Idempotent runtime bootstrap for the PUBLISHED Blissful image
-# (angablade/blissful:latest).
+# (an image built from an older release rather than this fork).
 #
 # The repo-built image already contains Deno 2.x, yt-dlp>=2026.10.26 and
 # bgutil-ytdlp-pot-provider>=2.0.2. The published image does not, so this

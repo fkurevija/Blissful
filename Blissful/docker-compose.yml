@@ -5,7 +5,7 @@
 # bgutil-ytdlp-pot-provider>=2.0.2, and the blissful-pot sidecar runs on the
 # SAME Docker network at http://blissful-pot:4416 (no published host port).
 #
-# Using the published image instead? See the commented `image:` line below and
+# Using an image you published from this fork instead? See the commented `image:` line and
 # run scripts/setup-ytdlp-runtime.sh once against your persistent downloads dir.
 
 services:
@@ -13,10 +13,11 @@ services:
     # Default: build the self-contained image from this repository.
     build: .
 
-    # Published-image alternative: comment out `build: .` above, uncomment
-    # the line below, then bootstrap the runtime once (see script header):
+    # Alternative: comment out `build: .` above and uncomment the line below
+    # if you have published an image from this fork yourself. If that image
+    # lacks Deno/PO-token support, bootstrap once (see the script header):
     #   docker exec -u 0 blissful sh /app/scripts/setup-ytdlp-runtime.sh
-    # image: angablade/blissful:latest
+    # image: <you>/blissful:latest  # publish a build from this fork first
 
     container_name: blissful
 
