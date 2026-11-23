@@ -49,7 +49,11 @@ python Blissful.py --wanted-search                 # preview search all missing
 python Blissful.py --wanted-search --apply         # actually queue the search
 python Blissful.py --stale-cleanup                 # dry-run stale cleanup
 python Blissful.py --stale-cleanup --apply         # search + delete after import
+python Blissful.py --wanted-search --json-only    # pure JSON report for automation
 ```
+
+Logs go to stderr and are suppressed automatically when stdout is piped; use
+`--json-only` to force this even when attached to a terminal.
 
 State lives in `/app/downloads/wanted-search-state.json`; use the **Reset state**
 button to clear it after you have manually resolved an album.

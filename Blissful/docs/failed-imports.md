@@ -49,7 +49,8 @@ docker compose exec blissful python Blissful.py --retry-failed-imports --apply
 
 The command prints a JSON report: queue total, failures, unsupported items and
 per-album status (`skipped`, `imported`, `failed`). Exit code is 1 when any
-album failed.
+album failed. Add `--json-only` to suppress startup logs entirely (also done
+automatically when stdout is piped), so even merged stdout/stderr is pure JSON.
 
 ## State and paths
 

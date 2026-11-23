@@ -31,6 +31,40 @@ from extend.job_manager import JobManager
 from extend.wanted_search import WantedSearchService
 from extend.routes import register_routes
 
+def parse_args(argv=None):
+    """CLI flags; the web server is the default when none are given."""
+    parser = argparse.ArgumentParser(description='Blissful Lidarr downloader')
+    parser.add_argument('--retry-failed-imports', action='store_true',
+                        help='recover Lidarr failed imports (dry-run unless --apply)')
+    parser.add_argument('--album-id', type=int, help='limit recovery to one Lidarr album')
+    parser.add_argument('--apply', action='store_true', help='actually download and import')
+    parser.add_argument('--reset', action='store_true', help='clear failed-import state and exit')
+    parser.add_argument('--state-path',
+                        default=os.environ.get('FAILED_IMPORTS_STATE',
+                                               '/app/downloads/failed-imports-state.json'),
+                        help='state file for recovered albums')
+    parser.add_argument('--host-prefix',
+                        default=os.environ.get('FAILED_IMPORTS_HOST_PREFIX', ''),
+                        help='host prefix for file checks, e.g. /mnt/Storage/Music')
+    parser.add_argument('--wanted-search', action='store_true',
+                        help='search Lidarr wanted items (dry-run unless --apply)')
+    parser.add_argument('--stale-cleanup', action='store_true',
+                        help='search stale torrents and remove them after import')
+    parser.add_argument('--json-only', action='store_true',
+                        help='suppress all logs so stdout/stderr contains only the JSON report')
+    return parser.parse_args(argv)
+
+
+# Parse before any manager is constructed, so --help and log suppression take
+# effect before startup messages are emitted.
+CLI_ARGS = parse_args() if __name__ == '__main__' else None
+_CLI_MODES = ('retry_failed_imports', 'wanted_search', 'stale_cleanup')
+if CLI_ARGS and (CLI_ARGS.json_only or
+                 (any(getattr(CLI_ARGS, mode) for mode in _CLI_MODES)
+                  and not sys.stdout.isatty())):
+    logging.disable(logging.CRITICAL)
+
+
 # Initialize Flask app
 app = Flask(__name__)
 
@@ -126,30 +160,8 @@ register_routes(
 )
 logger.info("✅ All routes registered successfully")
 
-def parse_args(argv=None):
-    """CLI flags; the web server is the default when none are given."""
-    parser = argparse.ArgumentParser(description='Blissful Lidarr downloader')
-    parser.add_argument('--retry-failed-imports', action='store_true',
-                        help='recovery Lidarr failed imports (dry-run unless --apply)')
-    parser.add_argument('--album-id', type=int, help='limit recovery to one Lidarr album')
-    parser.add_argument('--apply', action='store_true', help='actually download and import')
-    parser.add_argument('--reset', action='store_true', help='clear failed-import state and exit')
-    parser.add_argument('--state-path',
-                        default=os.environ.get('FAILED_IMPORTS_STATE',
-                                               '/app/downloads/failed-imports-state.json'),
-                        help='state file for recovered albums')
-    parser.add_argument('--host-prefix',
-                        default=os.environ.get('FAILED_IMPORTS_HOST_PREFIX', ''),
-                        help='host prefix for file checks, e.g. /mnt/Storage/Music')
-    parser.add_argument('--wanted-search', action='store_true',
-                        help='search Lidarr wanted items (dry-run unless --apply)')
-    parser.add_argument('--stale-cleanup', action='store_true',
-                        help='search stale torrents and remove them after import')
-    return parser.parse_args(argv)
-
-
 if __name__ == '__main__':
-    args = parse_args()
+    args = CLI_ARGS
 
     # Ensure directories exist
     os.makedirs('downloads', exist_ok=True)

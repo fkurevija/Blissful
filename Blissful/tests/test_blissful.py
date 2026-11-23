@@ -685,3 +685,20 @@ def test_stale_cleanup_deletes_only_after_import(tmp_path, monkeypatch):
     again = svc.cleanup_stale(apply=True, wait_minutes=1)
     assert again['counts']['deleted'] == 0
     assert any('already recorded' in str(s) for s in again['skipped'])
+
+
+def test_cli_json_only_emits_pure_json():
+    import os
+    import subprocess
+    import sys
+
+    env = os.environ.copy()
+    env['WANTED_SEARCH_ENABLED'] = 'true'
+    result = subprocess.run(
+        [sys.executable, 'Blissful.py', '--wanted-search', '--json-only'],
+        cwd=str(APP_DIR), env=env, stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT, text=True, timeout=30
+    )
+    payload = json.loads(result.stdout)
+    assert payload['success'] is True
+    assert payload['applied'] is False
