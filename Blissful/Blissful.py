@@ -137,6 +137,11 @@ except OSError:
     _STATIC_VERSION = 0
 
 
+@app.route('/favicon.ico')
+def favicon_ico():
+    return app.send_static_file('favicon.svg')
+
+
 @app.context_processor
 def inject_static_version():
     return {'static_version': _STATIC_VERSION}
