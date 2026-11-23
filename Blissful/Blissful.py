@@ -102,7 +102,8 @@ album_manager = AlbumManager(config_manager, LidarrClient, download_manager, aud
 track_manager = TrackManager(config_manager, LidarrClient, download_manager, audio_converter)
 sources_api = SourcesAPI(source_manager)
 system_utils = SystemUtils(config_manager)
-job_manager = JobManager(config_manager, album_manager)
+job_manager = JobManager(config_manager, album_manager,
+                          storage_path='/app/downloads/jobs.json')
 failed_imports = FailedImportsRetry(config_manager, LidarrClient,
                                     download_manager, album_manager, job_manager)
 wanted_search = WantedSearchService(config_manager, LidarrClient,
