@@ -54,13 +54,16 @@ class ConfigManager:
             'BLISSFUL_AUTH_TOKEN': 'auth_token',
             'LIDARR_URL': 'lidarr_url',
             'LIDARR_API_KEY': 'lidarr_api_key',
+            'WANTED_SEARCH_ENABLED': 'wanted_search_enabled',
+            'STALE_CLEANUP_ENABLED': 'stale_cleanup_enabled',
             'SPOTIFY_CLIENT_ID': 'spotify_client_id',
             'SPOTIFY_CLIENT_SECRET': 'spotify_client_secret',
             'POT_PROVIDER_URL': 'pot_provider_url',
             'DENO_PATH': 'deno_path',
             'YT_DLP_CONFIG_FILE': 'ytdlp_config_file',
         }
-        bool_keys = {'enable_pot_provider', 'spotify_metadata_enabled'}
+        bool_keys = {'enable_pot_provider', 'spotify_metadata_enabled',
+                     'wanted_search_enabled', 'stale_cleanup_enabled'}
         for env_key, config_key in env_map.items():
             value = os.environ.get(env_key)
             if value is None or value == '':
@@ -121,6 +124,11 @@ class ConfigManager:
             'enable_jobs': True,
             'auto_retry_failed': False,
             'job_retention_days': 7,
+            # Wanted search / stale torrent cleanup (opt-in).
+            'wanted_search_enabled': False,
+            'stale_cleanup_enabled': False,
+            'stale_cleanup_interval_hours': 6,
+            'stale_cleanup_wait_minutes': 10,
             # Request system defaults
             'enable_requests': False,
             'auto_monitor_requests': False,
@@ -295,7 +303,8 @@ class ConfigManager:
         # Metadata provider, API token and yt-dlp runtime settings.
         for key in ('spotify_metadata_enabled', 'enable_pot_provider',
                     'validate_duration', 'use_lidarr_naming', 'enable_jobs',
-                    'auto_retry_failed'):
+                    'auto_retry_failed', 'wanted_search_enabled',
+                    'stale_cleanup_enabled'):
             if key in config:
                 validated[key] = bool(config[key])
         for key in ('spotify_client_id', 'spotify_client_secret', 'auth_token'):
@@ -325,6 +334,15 @@ class ConfigManager:
                     validated['job_retention_days'] = days
             except (ValueError, TypeError):
                 pass
+        for key, minimum in (('stale_cleanup_interval_hours', 1),
+                             ('stale_cleanup_wait_minutes', 1)):
+            if key in config:
+                try:
+                    value = int(config[key])
+                    if value >= minimum:
+                        validated[key] = value
+                except (ValueError, TypeError):
+                    pass
         
         return validated
     

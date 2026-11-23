@@ -714,3 +714,44 @@ class LidarrClient:
         except Exception as exc:
             logger.error(f"Error polling Lidarr command {command_id}: {exc}")
             return {'status': 'failed', 'message': str(exc)}
+
+    def get_wanted_missing(self, page: int = 1, page_size: int = 200) -> Dict:
+        """Return one page of Lidarr's Wanted -> Missing list."""
+        try:
+            response = requests.get(
+                f"{self.url}/api/v1/wanted/missing",
+                headers=self.headers,
+                params={
+                    'page': page, 'pageSize': page_size,
+                    'sortKey': 'releaseDate', 'sortDirection': 'descending'
+                },
+                timeout=30
+            )
+            if response.status_code == 200:
+                return response.json()
+            logger.error(f"Failed to get wanted/missing: {response.status_code}")
+            return {'records': [], 'totalRecords': 0}
+        except Exception as exc:
+            logger.error(f"Error getting wanted/missing: {exc}")
+            return {'records': [], 'totalRecords': 0}
+
+    def delete_queue_item(self, queue_id, delete_files: bool = False,
+                          add_import_exclusion: bool = False) -> Dict:
+        """Remove an item from Lidarr's Activity Queue (never deletes files)."""
+        try:
+            response = requests.delete(
+                f"{self.url}/api/v1/queue/{queue_id}",
+                headers=self.headers,
+                params={
+                    'deleteFiles': bool(delete_files),
+                    'addImportExclusion': bool(add_import_exclusion)
+                },
+                timeout=30
+            )
+            if response.status_code in (200, 202, 204):
+                return {'success': True, 'queue_id': queue_id}
+            logger.error(f"Failed to delete queue item {queue_id}: {response.status_code}")
+            return {'success': False, 'error': f'HTTP {response.status_code}'}
+        except Exception as exc:
+            logger.error(f"Error deleting queue item {queue_id}: {exc}")
+            return {'success': False, 'error': str(exc)}

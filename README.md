@@ -59,6 +59,7 @@ A powerful microservice that automatically downloads missing music tracks for yo
 - 🎛️ **Audio Processing** - Normalization, format conversion, metadata embedding
 - 🗺️ **Path Mapping** - Support for remote/Docker Lidarr instances
 - 🔁 **Failed Import Recovery** - Retry unhealthy Lidarr imports with native duration/tag verification
+- 🔎 **Wanted Search** - Search selected or all missing albums and clean up stale torrents on a schedule
 - 🔍 **Source Priorities** - Configure preferred download sources
 
 ---
@@ -204,6 +205,7 @@ Comprehensive documentation is available in the **Docs** tab of the web interfac
 - **🎵 Request System** - Setting up user requests
 - **🔧 Troubleshooting** - Common issues and solutions
 - **🔁 Failed Imports** - Native, dry-run-by-default recovery of Lidarr failed imports
+- **🔎 Wanted Search** - Search Lidarr wanted albums and clean up stale torrents
 
 ---
 

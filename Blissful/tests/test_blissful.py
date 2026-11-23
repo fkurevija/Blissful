@@ -534,3 +534,154 @@ def test_failed_imports_reset_clears_state(tmp_path):
     report = retry.run(reset=True)
     assert report['reset'] is True
     assert not state.exists()
+
+
+def test_config_has_wanted_search_defaults(tmp_path):
+    cfg = ConfigManager(config_file=str(tmp_path / 'config.json')).get_config()
+    assert cfg['wanted_search_enabled'] is False
+    assert cfg['stale_cleanup_enabled'] is False
+    assert cfg['stale_cleanup_interval_hours'] == 6
+    assert cfg['stale_cleanup_wait_minutes'] == 10
+
+
+def test_lidarr_wanted_and_queue_delete(monkeypatch):
+    from extend.lidarr_client import LidarrClient
+
+    calls = []
+
+    class FakeResponse:
+        status_code = 200
+
+        def json(self):
+            return {'totalRecords': 0, 'records': []}
+
+    class FakeDelete:
+        status_code = 204
+
+    def fake_get(url, **kwargs):
+        calls.append(('get', kwargs.get('params')))
+        return FakeResponse()
+
+    def fake_delete(url, **kwargs):
+        calls.append(('delete', url, kwargs.get('params')))
+        return FakeDelete()
+
+    monkeypatch.setattr('requests.get', fake_get)
+    monkeypatch.setattr('requests.delete', fake_delete)
+    client = LidarrClient('http://lidarr:8686', 'key')
+    client.get_wanted_missing(page=2, page_size=50)
+    result = client.delete_queue_item(123, delete_files=False,
+                                      add_import_exclusion=False)
+    assert result['success'] is True
+    assert calls[0] == ('get', {'page': 2, 'pageSize': 50,
+                                'sortKey': 'releaseDate',
+                                'sortDirection': 'descending'})
+    assert calls[1][0] == 'delete'
+    assert calls[1][1].endswith('/api/v1/queue/123')
+    assert calls[1][2] == {'deleteFiles': False, 'addImportExclusion': False}
+
+
+def _wanted_service(tmp_path, enabled=True, client=None):
+    from extend.wanted_search import WantedSearchService
+
+    class Config:
+        def get_config(self):
+            return {
+                'wanted_search_enabled': enabled,
+                'stale_cleanup_enabled': False,
+                'stale_cleanup_interval_hours': 6,
+                'stale_cleanup_wait_minutes': 10,
+            }
+
+    svc = WantedSearchService(Config(), client or object(),
+                              str(tmp_path / 'wanted-state.json'))
+    if client is not None:
+        svc._client = client
+    return svc
+
+
+def test_wanted_search_dry_run_and_gate(tmp_path):
+    svc = _wanted_service(tmp_path, enabled=True)
+    report = svc.search(album_ids=[1, 2], apply=False)
+    assert report['success'] is True
+    assert report['applied'] is False
+    assert report['count'] == 2
+    assert 'dry run' in report['note']
+
+    disabled = _wanted_service(tmp_path, enabled=False)
+    blocked = disabled.search(apply=True)
+    assert blocked['success'] is False
+    assert 'disabled' in blocked['error']
+
+
+def test_wanted_search_apply_posts_commands(tmp_path):
+    calls = []
+
+    class Client:
+        def post_command(self, name, **body):
+            calls.append((name, body))
+            return {'id': 42}
+
+    svc = _wanted_service(tmp_path, client=Client())
+    selected = svc.search(album_ids=['3', 'bad'], apply=True)
+    assert selected['command_id'] == 42
+    assert calls == [('AlbumSearch', {'albumIds': [3]})]
+
+    all_report = svc.search(apply=True)
+    assert all_report['mode'] == 'all'
+    assert calls[-1] == ('MissingAlbumSearch', {})
+
+
+def test_stale_cleanup_deletes_only_after_import(tmp_path, monkeypatch):
+    import extend.wanted_search as wanted_mod
+
+    monkeypatch.setattr(wanted_mod.time, 'sleep', lambda *a, **k: None)
+
+    calls = []
+    track_calls = {'n': 0}
+
+    class Client:
+        def get_all_queue_records(self, page_size=200):
+            return [
+                {'id': 11, 'albumId': 10, 'downloadId': 'd1',
+                 'title': 'Stalled album',
+                 'errorMessage': 'The download is stalled with no connections'},
+                {'id': 12, 'albumId': 20, 'downloadId': 'd2',
+                 'title': 'Healthy', 'errorMessage': ''},
+            ]
+
+        def get_album_tracks(self, aid):
+            track_calls['n'] += 1
+            if track_calls['n'] == 1:
+                return [{'id': 1, 'hasFile': False}]
+            return [{'id': 1, 'hasFile': True}]
+
+        def post_command(self, name, **body):
+            calls.append(('search', name, body))
+            return {'id': 77}
+
+        def get_command(self, cid):
+            return {'id': cid, 'status': 'completed'}
+
+        def delete_queue_item(self, rid, delete_files=False,
+                              add_import_exclusion=False):
+            calls.append(('delete', rid, delete_files, add_import_exclusion))
+            return {'success': True}
+
+    svc = _wanted_service(tmp_path, client=Client())
+    stale = svc.get_stale()
+    assert [record['id'] for record in stale] == [11]
+
+    dry = svc.cleanup_stale(apply=False)
+    assert dry['counts']['deleted'] == 0
+    assert not any(c[0] == 'delete' for c in calls)
+
+    applied = svc.cleanup_stale(apply=True, wait_minutes=1)
+    assert applied['counts']['imported'] == 1
+    assert applied['counts']['deleted'] == 1
+    assert calls[0] == ('search', 'AlbumSearch', {'albumIds': [10]})
+    assert ('delete', 11, False, False) in calls
+
+    again = svc.cleanup_stale(apply=True, wait_minutes=1)
+    assert again['counts']['deleted'] == 0
+    assert any('already recorded' in str(s) for s in again['skipped'])

@@ -12,7 +12,8 @@ logger = logging.getLogger(__name__)
 def register_routes(app, config_manager, lidarr_client, download_manager, 
                     audio_converter, source_manager, auth_manager, 
                     request_manager, album_manager, track_manager, 
-                    sources_api, system_utils, job_manager=None):
+                    sources_api, system_utils, job_manager=None,
+                    wanted_search=None):
     """
     Register all API routes with the Flask app
     
@@ -343,6 +344,62 @@ def register_routes(app, config_manager, lidarr_client, download_manager,
             logger.error(f"Error getting Lidarr paths: {e}")
             return jsonify({'success': False, 'error': str(e)}), 500
     
+    # ==================== WANTED SEARCH / STALE CLEANUP ====================
+
+    @app.route('/api/wanted', methods=['GET'])
+    def get_wanted_items():
+        if not wanted_search:
+            return jsonify({'success': False, 'error': 'Wanted search unavailable'}), 404
+        return jsonify({'success': True, 'items': wanted_search.get_wanted()})
+
+    @app.route('/api/stale-torrents', methods=['GET'])
+    def get_stale_torrents():
+        if not wanted_search:
+            return jsonify({'success': False, 'error': 'Wanted search unavailable'}), 404
+        return jsonify({'success': True, 'items': wanted_search.get_stale()})
+
+    @app.route('/api/wanted/search', methods=['POST'])
+    def run_wanted_search():
+        if not wanted_search:
+            return jsonify({'success': False, 'error': 'Wanted search unavailable'}), 404
+        data = request.json or {}
+        result = wanted_search.search(
+            album_ids=data.get('album_ids'),
+            apply=bool(data.get('apply', False))
+        )
+        if not result.get('success', True):
+            return jsonify(result), 400
+        return jsonify(result)
+
+    @app.route('/api/stale-torrents/cleanup', methods=['POST'])
+    def run_stale_cleanup():
+        if not wanted_search:
+            return jsonify({'success': False, 'error': 'Wanted search unavailable'}), 404
+        data = request.json or {}
+        result = wanted_search.cleanup_stale(
+            record_ids=data.get('record_ids'),
+            apply=bool(data.get('apply', False))
+        )
+        return jsonify(result)
+
+    @app.route('/api/wanted/status', methods=['GET'])
+    def wanted_status():
+        config = config_manager.get_config()
+        return jsonify({
+            'success': True,
+            'wanted_search_enabled': bool(config.get('wanted_search_enabled')),
+            'stale_cleanup_enabled': bool(config.get('stale_cleanup_enabled')),
+            'stale_cleanup_interval_hours': config.get('stale_cleanup_interval_hours', 6),
+            'stale_cleanup_wait_minutes': config.get('stale_cleanup_wait_minutes', 10),
+        })
+
+    @app.route('/api/wanted/reset', methods=['POST'])
+    def reset_wanted_state():
+        if not wanted_search:
+            return jsonify({'success': False, 'error': 'Wanted search unavailable'}), 404
+        wanted_search.reset_state()
+        return jsonify({'success': True, 'message': 'Wanted search state cleared'})
+
     # ==================== SOURCES ROUTES ====================
     
     @app.route('/api/supported-sources', methods=['GET'])

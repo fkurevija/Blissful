@@ -1,0 +1,72 @@
+<!-- Tab: Wanted search and stale torrent cleanup -->
+<div id="wanted-tab" class="tab-content">
+    <div class="card">
+        <h2>🔎 Wanted Search &amp; Stale Cleanup</h2>
+        <p class="info-text">
+            Trigger searches for Lidarr's wanted items, or re-search stale torrents and remove
+            them from the Activity Queue only after Lidarr has imported the replacement.
+            Manual actions are <strong>dry-run by default</strong>; tick Apply to make changes.
+        </p>
+        <div class="form-group">
+            <label><input type="checkbox" id="wantedSearchEnabled"> Enable wanted search controls</label>
+        </div>
+        <div class="form-group">
+            <label><input type="checkbox" id="staleCleanupEnabled"> Enable scheduled stale-torrent cleanup</label>
+        </div>
+        <div class="form-row">
+            <div class="form-group">
+                <label for="staleCleanupInterval">Cleanup interval (hours)</label>
+                <input type="number" id="staleCleanupInterval" min="1" value="6">
+            </div>
+            <div class="form-group">
+                <label for="staleCleanupWait">Import wait per album (minutes)</label>
+                <input type="number" id="staleCleanupWait" min="1" value="10">
+            </div>
+        </div>
+        <button type="button" class="btn btn-secondary" id="saveWantedSettings">💾 Save settings</button>
+    </div>
+
+    <div class="card">
+        <h3>📋 Wanted / missing albums</h3>
+        <div class="actions">
+            <button type="button" class="btn btn-secondary" id="loadWanted">🔄 Load list</button>
+            <button type="button" class="btn btn-secondary" id="selectAllWanted">Select all</button>
+        </div>
+        <div id="wantedList" class="wanted-list"><em>Load the list to choose albums.</em></div>
+        <div class="actions">
+            <label><input type="checkbox" id="wantedApply"> Apply (start searches)</label>
+            <button type="button" class="btn btn-primary" id="searchSelected">Search selected</button>
+            <button type="button" class="btn btn-primary" id="searchAll">Search all missing</button>
+        </div>
+        <pre id="wantedResult" class="result-box"></pre>
+    </div>
+
+    <div class="card">
+        <h3>🧹 Stale torrents</h3>
+        <div class="actions">
+            <button type="button" class="btn btn-secondary" id="loadStale">🔄 Load stale items</button>
+            <button type="button" class="btn btn-secondary" id="selectAllStale">Select all</button>
+        </div>
+        <div id="staleList" class="wanted-list"><em>Load the list to choose stale torrents.</em></div>
+        <div class="actions">
+            <label><input type="checkbox" id="staleApply"> Apply (search, then delete after import)</label>
+            <button type="button" class="btn btn-primary" id="cleanupStale">Run cleanup</button>
+        </div>
+        <pre id="staleResult" class="result-box"></pre>
+    </div>
+
+    <div class="card">
+        <h3>🧽 State</h3>
+        <p class="help-text">Albums already handled are remembered so a second run never re-searches them.</p>
+        <button type="button" class="btn btn-secondary" id="resetWantedState">Reset state</button>
+    </div>
+</div>
+
+<style>
+.wanted-list { max-height: 260px; overflow-y: auto; margin: 10px 0; border: 1px solid var(--border); border-radius: 6px; padding: 6px; }
+.wanted-row { display: flex; align-items: center; gap: 8px; padding: 5px; border-bottom: 1px solid var(--border); }
+.wanted-row:last-child { border-bottom: none; }
+.wanted-row label { flex: 1; cursor: pointer; }
+.result-box { white-space: pre-wrap; word-break: break-word; max-height: 220px; overflow: auto; background: var(--bg-secondary); padding: 10px; border-radius: 6px; }
+.form-row { display: flex; gap: 16px; flex-wrap: wrap; }
+</style>

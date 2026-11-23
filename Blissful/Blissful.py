@@ -28,6 +28,7 @@ from extend.system_utils import SystemUtils
 from extend.spotify_client import SpotifyClient
 from extend.auth import install_auth, is_enabled
 from extend.job_manager import JobManager
+from extend.wanted_search import WantedSearchService
 from extend.routes import register_routes
 
 # Initialize Flask app
@@ -66,6 +67,7 @@ track_manager = TrackManager(config_manager, LidarrClient, download_manager, aud
 sources_api = SourcesAPI(source_manager)
 system_utils = SystemUtils(config_manager)
 job_manager = JobManager(config_manager, album_manager)
+wanted_search = WantedSearchService(config_manager, LidarrClient)
 
 logger.info("✅ All modular managers initialized")
 
@@ -119,7 +121,8 @@ register_routes(
     track_manager=track_manager,
     sources_api=sources_api,
     system_utils=system_utils,
-    job_manager=job_manager
+    job_manager=job_manager,
+    wanted_search=wanted_search
 )
 logger.info("✅ All routes registered successfully")
 
@@ -138,6 +141,10 @@ def parse_args(argv=None):
     parser.add_argument('--host-prefix',
                         default=os.environ.get('FAILED_IMPORTS_HOST_PREFIX', ''),
                         help='host prefix for file checks, e.g. /mnt/Storage/Music')
+    parser.add_argument('--wanted-search', action='store_true',
+                        help='search Lidarr wanted items (dry-run unless --apply)')
+    parser.add_argument('--stale-cleanup', action='store_true',
+                        help='search stale torrents and remove them after import')
     return parser.parse_args(argv)
 
 
@@ -164,6 +171,16 @@ if __name__ == '__main__':
         failed = any(a.get('status') == 'failed' for a in report.get('albums', []))
         sys.exit(1 if failed else 0)
 
+    if args.wanted_search:
+        result = wanted_search.search(apply=args.apply)
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+        sys.exit(0 if result.get('success', True) else 1)
+
+    if args.stale_cleanup:
+        result = wanted_search.cleanup_stale(apply=args.apply)
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+        sys.exit(0 if result.get('success', True) else 1)
+
     if not is_enabled(config_manager):
         logger.warning("⚠️  API token is OFF. Anyone who can reach Blissful can change "
                        "settings and trigger downloads. Set auth_token (or "
@@ -184,6 +201,7 @@ if __name__ == '__main__':
                            health.get('pot_provider_url'))
 
     job_manager.start_worker()
+    wanted_search.start_scheduler()
 
     logger.info("🚀 Starting Flask application...")
     logger.info("")

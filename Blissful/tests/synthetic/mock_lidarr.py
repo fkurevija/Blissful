@@ -37,8 +37,32 @@ class Handler(BaseHTTPRequestHandler):
             self._send(ALBUM)
         elif self.path.startswith('/api/v1/track'):
             self._send([TRACK])
+        elif self.path.startswith('/api/v1/wanted/missing'):
+            self._send({
+                'page': 1, 'pageSize': 200, 'totalRecords': 1,
+                'records': [{'id': 1, 'albumId': 10, 'artistId': 5,
+                             'title': 'Synthetic Track', 'albumTitle': 'Synthetic Album',
+                             'monitored': True, 'releaseDate': '2026-01-01T00:00:00Z'}]
+            })
+        elif self.path.startswith('/api/v1/queue'):
+            self._send({
+                'page': 1, 'pageSize': 200, 'totalRecords': 1,
+                'records': [{'id': 11, 'albumId': 10, 'downloadId': 'synthetic-dl',
+                             'title': 'Stalled Album',
+                             'errorMessage': 'The download is stalled with no connections',
+                             'trackedDownloadState': 'downloading'}]
+            })
         else:
             self._send({'ok': True})
+
+    def do_POST(self):
+        if self.path.startswith('/api/v1/command'):
+            self._send({'id': 1, 'status': 'queued'}, 201)
+        else:
+            self._send({'success': True})
+
+    def do_DELETE(self):
+        self._send('', 204)
 
     def log_message(self, format, *args):  # noqa: A002 - stdlib signature
         pass

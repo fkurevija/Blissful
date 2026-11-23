@@ -21,6 +21,8 @@ services:
       PGID: "1000"
       TZ: America/Toronto
       ENABLE_POT_PROVIDER: "false"
+      WANTED_SEARCH_ENABLED: "true"
+      STALE_CLEANUP_ENABLED: "false"
       BLISSFUL_AUTH_TOKEN: synthetic-token
       LIDARR_URL: http://mock-lidarr:8686
       LIDARR_API_KEY: synthetic-key
