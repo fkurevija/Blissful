@@ -31,14 +31,17 @@ function setWantedButtonsBusy(busy) {
     });
 }
 
+// One shared toast for every wanted run, whether started here, by the
+// scheduler, or in another tab. This avoids stacked "started" toasts.
+const WANTED_TOAST_ID = 'wanted-toast-active';
 let wantedActiveShown = false;
 
 function applyWantedBusy(active) {
     setWantedButtonsBusy(!!active);
     if (active && !wantedActiveShown) {
         wantedActiveShown = true;
-        beginWantedProgress('wanted-toast-run',
-            active.kind === 'cleanup' ? 'Cleaning stale torrents' : 'Searching wanted albums');
+        beginWantedProgress(active.kind === 'cleanup'
+            ? 'Cleaning stale torrents' : 'Searching wanted albums');
     }
     if (!active) wantedActiveShown = false;
 }
@@ -70,19 +73,20 @@ function wantedToast(id, message, type) {
     return el;
 }
 
-function finishWantedToast(id, message, type) {
-    const state = wantedToastState[id] || { done: false };
+function finishWantedToast(message, type) {
+    const state = wantedToastState[WANTED_TOAST_ID] || { done: false };
     state.done = true;
-    wantedToast(id, message, type);
+    wantedActiveShown = false;
+    wantedToast(WANTED_TOAST_ID, message, type);
     setTimeout(() => {
-        const el = document.getElementById(id);
+        const el = document.getElementById(WANTED_TOAST_ID);
         if (el) el.remove();
-        delete wantedToastState[id];
+        delete wantedToastState[WANTED_TOAST_ID];
     }, type === 'error' ? 8000 : 5000);
 }
 
-async function pollWantedProgress(id, label) {
-    const state = wantedToastState[id] || { done: false };
+async function pollWantedProgress(label) {
+    const state = wantedToastState[WANTED_TOAST_ID] || { done: false };
     const started = Date.now();
     while (!state.done) {
         await new Promise(resolve => setTimeout(resolve, 1500));
@@ -107,15 +111,18 @@ async function pollWantedProgress(id, label) {
         } catch (e) {
             detail = 'status unavailable';
         }
-        if (!state.done) wantedToast(id, `${label} — ${detail} (${elapsed}s)`, 'info');
+        if (!state.done) wantedToast(WANTED_TOAST_ID, `${label} — ${detail} (${elapsed}s)`, 'info');
         if (elapsed > 900) break;
     }
 }
 
-function beginWantedProgress(id, label) {
-    wantedToastState[id] = { done: false };
-    wantedToast(id, `${label} — starting…`, 'info');
-    pollWantedProgress(id, label);
+function beginWantedProgress(label) {
+    wantedActiveShown = true;
+    const state = wantedToastState[WANTED_TOAST_ID];
+    wantedToast(WANTED_TOAST_ID, `${label} — starting…`, 'info');
+    if (state && !state.done) return;  // a progress poll is already running
+    wantedToastState[WANTED_TOAST_ID] = { done: false };
+    pollWantedProgress(label);
 }
 
 function wantedResult(id, value) {
@@ -229,9 +236,8 @@ async function runWantedSearch(mode) {
         showNotification('Select at least one album first', 'warning');
         return;
     }
-    const toastId = 'wanted-toast-search';
     setWantedButtonsBusy(true);
-    beginWantedProgress(toastId, apply ? 'Queuing searches' : 'Previewing search');
+    beginWantedProgress(apply ? 'Queuing searches' : 'Previewing search');
     try {
         const result = await wantedApi('/api/wanted/search', {
             method: 'POST',
@@ -241,22 +247,25 @@ async function runWantedSearch(mode) {
         const message = apply
             ? `Search queued — ${result.count} album(s), command ${result.command_id || 'n/a'}`
             : `Dry run complete — ${result.count} album(s) would be searched`;
-        finishWantedToast(toastId, message, 'success');
+        finishWantedToast(message, 'success');
     } catch (error) {
-        const detail = error.data && error.data.active
-            ? ` (${error.data.active.kind || 'run'} in progress)` : '';
-        finishWantedToast(toastId, `Search failed: ${error.message}${detail}`, 'error');
+        if (error.status === 409) {
+            const kind = (error.data && error.data.active && error.data.active.kind) || 'run';
+            finishWantedToast(`Not started — a ${kind} is already in progress`, 'warning');
+        } else {
+            finishWantedToast(`Search failed: ${error.message}`, 'error');
+        }
     } finally {
         setWantedButtonsBusy(false);
+        watchWantedBusy();
     }
 }
 
 async function runStaleCleanup() {
     const apply = document.getElementById('staleApply').checked;
     const record_ids = selectedValues('staleList', 'recordId');
-    const toastId = 'wanted-toast-cleanup';
     setWantedButtonsBusy(true);
-    beginWantedProgress(toastId, apply ? 'Cleaning stale torrents' : 'Previewing cleanup');
+    beginWantedProgress(apply ? 'Cleaning stale torrents' : 'Previewing cleanup');
     try {
         const result = await wantedApi('/api/stale-torrents/cleanup', {
             method: 'POST',
@@ -267,14 +276,18 @@ async function runStaleCleanup() {
         const message = apply
             ? `Cleanup finished — imported ${counts.imported || 0}, deleted ${counts.deleted || 0}, kept ${counts.kept || 0}`
             : `Dry run complete — ${counts.scanned || 0} stale item(s) found`;
-        finishWantedToast(toastId, message, 'success');
+        finishWantedToast(message, 'success');
         if (apply) loadStale();
     } catch (error) {
-        const detail = error.data && error.data.active
-            ? ` (${error.data.active.kind || 'run'} in progress)` : '';
-        finishWantedToast(toastId, `Cleanup failed: ${error.message}${detail}`, 'error');
+        if (error.status === 409) {
+            const kind = (error.data && error.data.active && error.data.active.kind) || 'run';
+            finishWantedToast(`Not started — a ${kind} is already in progress`, 'warning');
+        } else {
+            finishWantedToast(`Cleanup failed: ${error.message}`, 'error');
+        }
     } finally {
         setWantedButtonsBusy(false);
+        watchWantedBusy();
     }
 }
 
