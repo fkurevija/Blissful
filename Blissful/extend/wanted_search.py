@@ -194,8 +194,8 @@ class WantedSearchService:
         cfg = self._config()
         url = cfg.get('lidarr_url') or ''
         key = cfg.get('lidarr_api_key') or ''
-        markers = ('get_all_queue_records', 'post_command',
-                   'get_album_tracks', 'get_command')
+        markers = ('get_all_queue_records', 'get_wanted_missing',
+                   'post_command', 'get_album_tracks', 'get_command')
         try:
             if isinstance(factory, type):
                 try:
@@ -374,13 +374,19 @@ class WantedSearchService:
                 if key in seen:
                     continue
                 seen.add(key)
+                artist_obj = record.get('artist') or {}
+                artist_name = str(artist_obj.get('artistName') or '')
+                secondary = record.get('secondaryTypes') or []
+                album_type = str(record.get('albumType') or '')
                 results.append({
                     'id': record.get('id'),
-                    'albumId': record.get('albumId'),
+                    'albumId': record.get('id') or record.get('albumId'),
                     'artistId': record.get('artistId'),
-                    'title': str(record.get('title') or ''),
-                    'albumTitle': str(record.get('albumTitle') or ''),
-                    'releaseDate': record.get('releaseDate') or '',
+                    'artist': artist_name,
+                    'title': str(record.get('title') or record.get('albumTitle') or ''),
+                    'albumType': album_type,
+                    'secondaryTypes': [str(t) for t in secondary],
+                    'releaseDate': str(record.get('releaseDate') or ''),
                     'monitored': bool(record.get('monitored', False)),
                     'label': _safe_label(record),
                 })

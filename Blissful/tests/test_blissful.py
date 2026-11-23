@@ -890,3 +890,30 @@ def test_download_manager_reports_source_attempts(monkeypatch, tmp_path):
     assert progress['album'] == 'Album'
     assert [a['status'] for a in progress['attempts']] == ['failed', 'success']
     assert progress['status'] == 'downloaded'
+
+
+def test_wanted_list_exposes_artist_type_and_release(tmp_path):
+    from extend.wanted_search import WantedSearchService
+
+    class Client:
+        def get_wanted_missing(self, page=1, page_size=200):
+            return {'totalRecords': 1, 'records': [{
+                'id': 77, 'artistId': 5,
+                'artist': {'artistName': 'The Ocean'},
+                'title': 'Aeolian', 'albumType': 'Album',
+                'secondaryTypes': ['Compilation'],
+                'releaseDate': '2026-01-02T00:00:00Z', 'monitored': True,
+            }]}
+
+    class Config:
+        def get_config(self):
+            return {'wanted_search_enabled': True}
+
+    svc = WantedSearchService(Config(), Client(), str(tmp_path / 'state.json'))
+    svc._client = Client()
+    items = svc.get_wanted()
+    assert items[0]['artist'] == 'The Ocean'
+    assert items[0]['albumType'] == 'Album'
+    assert items[0]['secondaryTypes'] == ['Compilation']
+    assert items[0]['releaseDate'] == '2026-01-02T00:00:00Z'
+    assert items[0]['albumId'] == 77

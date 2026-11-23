@@ -153,26 +153,85 @@ function selectedValues(containerId, attribute) {
         .map(input => input.dataset[attribute]);
 }
 
+let wantedSort = { key: 'releaseDate', dir: 'desc' };
+let wantedItems = [];
+
+function sortWantedBy(key) {
+    if (wantedSort.key === key) {
+        wantedSort.dir = wantedSort.dir === 'asc' ? 'desc' : 'asc';
+    } else {
+        wantedSort = { key: key, dir: 'asc' };
+    }
+    renderWantedList(wantedItems);
+}
+
 function renderWantedList(items) {
     const container = document.getElementById('wantedList');
     if (!container) return;
+    wantedItems = items || [];
     container.innerHTML = '';
-    if (!items.length) {
+    if (!wantedItems.length) {
         container.innerHTML = '<em>No missing albums returned by Lidarr.</em>';
         return;
     }
-    items.forEach(item => {
-        const row = document.createElement('div');
-        row.className = 'wanted-row';
+    const sorted = wantedItems.slice().sort((a, b) => {
+        const av = String(a[wantedSort.key] || '').toLowerCase();
+        const bv = String(b[wantedSort.key] || '').toLowerCase();
+        const result = av.localeCompare(bv);
+        return wantedSort.dir === 'asc' ? result : -result;
+    });
+
+    const columns = [
+        ['artist', 'Artist'],
+        ['title', 'Album'],
+        ['albumType', 'Type'],
+        ['releaseDate', 'Released'],
+        ['id', 'ID']
+    ];
+    const table = document.createElement('table');
+    table.className = 'wanted-table';
+    const thead = document.createElement('thead');
+    const headRow = document.createElement('tr');
+    const checkHead = document.createElement('th');
+    checkHead.textContent = '';
+    headRow.appendChild(checkHead);
+    columns.forEach(([key, label]) => {
+        const th = document.createElement('th');
+        th.dataset.sortKey = key;
+        const arrow = wantedSort.key === key ? (wantedSort.dir === 'asc' ? ' ▲' : ' ▼') : '';
+        th.textContent = label + arrow;
+        th.addEventListener('click', () => sortWantedBy(key));
+        headRow.appendChild(th);
+    });
+    thead.appendChild(headRow);
+    table.appendChild(thead);
+
+    const tbody = document.createElement('tbody');
+    sorted.forEach(item => {
+        const row = document.createElement('tr');
+        const checkCell = document.createElement('td');
         const check = document.createElement('input');
         check.type = 'checkbox';
         check.dataset.albumId = item.albumId || item.id || '';
-        const label = document.createElement('label');
-        label.textContent = item.label || `${item.albumTitle || item.title || 'Unknown album'} (${item.artistId || ''})`;
-        row.appendChild(check);
-        row.appendChild(label);
-        container.appendChild(row);
+        checkCell.appendChild(check);
+        row.appendChild(checkCell);
+
+        const cells = [
+            item.artist || '',
+            item.title || item.label || '',
+            [item.albumType, ...(item.secondaryTypes || [])].filter(Boolean).join(' · '),
+            item.releaseDate ? String(item.releaseDate).slice(0, 10) : '',
+            String(item.id || '')
+        ];
+        cells.forEach(value => {
+            const td = document.createElement('td');
+            td.textContent = value;
+            row.appendChild(td);
+        });
+        tbody.appendChild(row);
     });
+    table.appendChild(tbody);
+    container.appendChild(table);
 }
 
 function renderStaleList(items) {

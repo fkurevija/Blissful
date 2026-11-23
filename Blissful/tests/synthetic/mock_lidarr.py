@@ -40,8 +40,10 @@ class Handler(BaseHTTPRequestHandler):
         elif self.path.startswith('/api/v1/wanted/missing'):
             self._send({
                 'page': 1, 'pageSize': 200, 'totalRecords': 1,
-                'records': [{'id': 1, 'albumId': 10, 'artistId': 5,
-                             'title': 'Synthetic Track', 'albumTitle': 'Synthetic Album',
+                'records': [{'id': 10, 'artistId': 5,
+                             'artist': {'artistName': 'Synthetic Artist'},
+                             'title': 'Synthetic Album', 'albumType': 'Album',
+                             'secondaryTypes': [],
                              'monitored': True, 'releaseDate': '2026-01-01T00:00:00Z'}]
             })
         elif self.path.startswith('/api/v1/queue'):
