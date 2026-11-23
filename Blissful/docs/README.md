@@ -198,6 +198,16 @@ Comprehensive documentation is available in the **Docs** tab of the web interfac
 - **🔧 Troubleshooting** - Common issues and solutions
 - **🔁 Failed Imports** - Native, dry-run-by-default recovery of Lidarr failed imports
 - **🔎 Wanted Search** - Search Lidarr wanted albums and clean up stale torrents
+- **📥 Downloads** - Job queue, history, progress and retries
+
+## 📥 Wanted Search & Downloads
+
+The **Wanted** tab can search Lidarr's missing albums and cascade failed searches
+into Blissful's own yt-dlp bridge, or gap-fill stale torrents directly. Actions
+are dry-run by default. A short toast shows progress and links to the **Downloads**
+tab, where you can inspect the job queue/history, see failure reasons and retry
+jobs. See [wanted-search.md](wanted-search.md) and
+[failed-imports.md](failed-imports.md).
 
 ---
 
