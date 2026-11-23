@@ -657,9 +657,7 @@ def test_stale_cleanup_deletes_only_after_import(tmp_path, monkeypatch):
 
         def get_album_tracks(self, aid):
             track_calls['n'] += 1
-            if track_calls['n'] == 1:
-                return [{'id': 1, 'hasFile': False}]
-            return [{'id': 1, 'hasFile': True}]
+            return [{'id': 1, 'hasFile': False}]
 
         def post_command(self, name, **body):
             calls.append(('search', name, body))
@@ -811,13 +809,17 @@ def test_stale_cleanup_can_use_lidarr_search_when_flag_false(tmp_path, monkeypat
     calls = []
 
     class Client:
+        def __init__(self):
+            self.track_calls = 0
+
         def get_all_queue_records(self, page_size=200):
             return [{'id': 11, 'albumId': 10, 'downloadId': 'd1',
                      'title': 'Stalled',
                      'errorMessage': 'The download is stalled with no connections'}]
 
         def get_album_tracks(self, aid):
-            return [{'id': 1, 'hasFile': True}]
+            self.track_calls += 1
+            return [{'id': 1, 'hasFile': self.track_calls > 1}]
 
         def post_command(self, name, **body):
             calls.append((name, body))
@@ -917,3 +919,30 @@ def test_wanted_list_exposes_artist_type_and_release(tmp_path):
     assert items[0]['secondaryTypes'] == ['Compilation']
     assert items[0]['releaseDate'] == '2026-01-02T00:00:00Z'
     assert items[0]['albumId'] == 77
+
+
+def test_stale_item_with_no_missing_tracks_is_skipped_with_reason(tmp_path, monkeypatch):
+    import extend.wanted_search as wanted_mod
+
+    monkeypatch.setattr(wanted_mod.time, 'sleep', lambda *a, **k: None)
+
+    class Client:
+        def get_all_queue_records(self, page_size=200):
+            return [{'id': 11, 'albumId': 1746, 'downloadId': 'd1',
+                     'title': 'Deftones - Gore',
+                     'errorMessage': 'The download is stalled with no connections'}]
+
+        def get_album_tracks(self, aid):
+            return [{'id': 1, 'hasFile': True}]
+
+        def post_command(self, *a, **k):
+            raise AssertionError('nothing should be searched')
+
+        def delete_queue_item(self, *a, **k):
+            raise AssertionError('nothing should be deleted')
+
+    svc = _wanted_service(tmp_path, client=Client(), gapfill=object())
+    report = svc.cleanup_stale(apply=True)
+    assert report['counts']['kept'] == 0
+    assert report['counts']['deleted'] == 0
+    assert report['skipped'][0]['reason'] == 'no missing tracks in Lidarr'

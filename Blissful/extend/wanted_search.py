@@ -619,6 +619,13 @@ class WantedSearchService:
                     continue
                 baseline = client.get_album_tracks(album_id) or []
                 baseline_missing = self._missing_count(baseline)
+                if baseline_missing == 0:
+                    report['skipped'].append({
+                        'album': album_id, 'title': title,
+                        'reason': 'no missing tracks in Lidarr',
+                        'ids': [record.get('id') for record in records],
+                    })
+                    continue
 
                 if not apply:
                     report['searched'].append({
@@ -650,10 +657,15 @@ class WantedSearchService:
                     })
                     if status not in ('succeeded', 'success'):
                         reason = str(gap.get('reason') or 'gap-fill did not succeed')
-                        report['errors'].append(reason[:300])
-                        report['skipped'].append({'album': album_id,
-                                                  'reason': reason[:200]})
-                        report['kept'].extend(record.get('id') for record in records)
+                        report['skipped'].append({
+                            'album': album_id, 'title': title,
+                            'reason': reason[:200],
+                            'ids': [record.get('id') for record in records],
+                        })
+                        if status != 'skipped':
+                            report['errors'].append(reason[:300])
+                            report['kept'].extend(record.get('id')
+                                                  for record in records)
                         continue
                 else:
                     try:

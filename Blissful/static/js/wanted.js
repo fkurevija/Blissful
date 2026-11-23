@@ -296,11 +296,11 @@ async function loadWanted() {
     }
 }
 
-async function loadStale() {
+async function loadStale(preserveResult) {
     try {
         const data = await wantedApi('/api/stale-torrents');
         renderStaleList(data.items || []);
-        wantedResult('staleResult', { count: (data.items || []).length });
+        if (!preserveResult) wantedResult('staleResult', { count: (data.items || []).length });
     } catch (error) {
         showNotification(`Could not load stale torrents: ${error.message}`, 'error');
     }
@@ -350,11 +350,14 @@ async function runStaleCleanup() {
         });
         wantedResult('staleResult', result);
         const counts = result.counts || {};
+        const reasons = (result.skipped || []).map(s => s.reason).filter(Boolean);
+        const errors = (result.errors || []).map(e => typeof e === 'string' ? e : e.reason).filter(Boolean);
+        const detail = [...reasons, ...errors].slice(0, 2).join('; ').slice(0, 160);
         const message = apply
-            ? `Cleanup finished — imported ${counts.imported || 0}, deleted ${counts.deleted || 0}, kept ${counts.kept || 0}`
-            : `Dry run complete — ${counts.scanned || 0} stale item(s) found`;
+            ? `Cleanup finished — imported ${counts.imported || 0}, deleted ${counts.deleted || 0}, kept ${counts.kept || 0}, skipped ${counts.skipped || 0}${detail ? ' — ' + detail : ''}`
+            : `Dry run complete — ${counts.scanned || 0} stale item(s) found, ${counts.skipped || 0} skipped${detail ? ' — ' + detail : ''}`;
         finishWantedToast(message, 'success');
-        if (apply) loadStale();
+        if (apply) loadStale(true);
     } catch (error) {
         if (error.status === 409) {
             const kind = (error.data && error.data.active && error.data.active.kind) || 'run';
