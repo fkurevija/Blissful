@@ -26,7 +26,7 @@ These fields are added by the runtime update. Interpret them like this:
 
 | Field | `false` means | Fix |
 |-------|---------------|-----|
-| `js_runtime_available` | Deno is missing or at the wrong path | Rebuild from the repo, or run `scripts/setup-ytdlp-runtime.sh` on the published image |
+| `js_runtime_available` | Deno is missing or at the wrong path | Use the fork image / rebuild from this fork, or run `scripts/setup-ytdlp-runtime.sh` on an older image |
 | `pot_provider_reachable` | Sidecar is down or on a different network | Start `blissful-pot` and put both containers on `blissful-network` |
 
 **Fix when building from the repo (automatic):**
@@ -37,7 +37,7 @@ docker compose up -d --build
 # bgutil-ytdlp-pot-provider>=2.0.2; compose starts the sidecar.
 ```
 
-**Fix when using the published image:**
+**Fix when using an older image (not built from this fork):**
 
 ```bash
 docker cp scripts/setup-ytdlp-runtime.sh blissful:/tmp/setup-ytdlp-runtime.sh

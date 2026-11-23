@@ -6,6 +6,7 @@ A powerful microservice that automatically downloads missing music tracks for yo
 ![Python](https://img.shields.io/badge/python-3.8+-green.svg)
 ![License](https://img.shields.io/badge/license-Unlicense-blue.svg)
 ![Docker](https://img.shields.io/badge/docker-build%20from%20source-blue?logo=docker)
+[![Docker Build](https://github.com/fkurevija/Blissful/actions/workflows/docker-publish.yml/badge.svg)](https://github.com/fkurevija/Blissful/actions/workflows/docker-publish.yml)
 
 ---
 
@@ -149,6 +150,28 @@ docker compose up -d --build
 docker compose logs -f blissful
 docker compose logs -f blissful-pot
 ```
+
+**Published image:** GitHub Actions builds and pushes `fkurevija/blissful:latest`
+(multi-arch: amd64 + arm64) from this fork on every push to `master` and on `v*`
+tags. Once the `DOCKERHUB_TOKEN` repository secret is configured you can simply
+`docker pull fkurevija/blissful:latest`. It already contains Deno and the
+PO-token plugin; still start `blissful-pot` from this repo's Compose file.
+
+### Publishing images (maintainers)
+
+`.github/workflows/docker-publish.yml` builds `fkurevija/blissful` for linux/amd64
+and linux/arm64 on pushes to `master`, on `v*` tags and via `workflow_dispatch`.
+Pull requests build only, without pushing. Create a Docker Hub access token with
+**Read/Write** scope, then add these repository secrets (locally, never in chat):
+
+```bash
+gh secret set DOCKERHUB_USERNAME -R fkurevija/Blissful -b fkurevija
+gh secret set DOCKERHUB_TOKEN -R fkurevija/Blissful -b "<your Docker Hub access token>"
+```
+
+Tags are `latest` on `master`, plus branch/semver/SHA tags. The image contains
+Deno + the PO-token plugin; run the `blissful-pot` sidecar from this repo's
+Compose file.
 
 ### Build from Source (Optional)
 

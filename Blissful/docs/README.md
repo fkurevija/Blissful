@@ -128,7 +128,9 @@ The application will start on **http://localhost:7373**
 ### Quick Start with Docker (Recommended)
 
 **Build from this fork (recommended):** the included Compose file builds the
-image and starts the `blissful-pot` PO-token sidecar on the same network.
+image and starts the `blissful-pot` PO-token sidecar on the same network. CI also
+publishes `fkurevija/blissful:latest` from this fork, which has the same runtime
+baked in.
 
 ```bash
 git clone https://github.com/fkurevija/Blissful.git

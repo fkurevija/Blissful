@@ -14,10 +14,10 @@ services:
     build: .
 
     # Alternative: comment out `build: .` above and uncomment the line below
-    # if you have published an image from this fork yourself. If that image
-    # lacks Deno/PO-token support, bootstrap once (see the script header):
-    #   docker exec -u 0 blissful sh /app/scripts/setup-ytdlp-runtime.sh
-    # image: <you>/blissful:latest  # publish a build from this fork first
+    # to use the image published by GitHub Actions from this fork. It contains
+    # the same Deno + PO-token runtime; only older images need the bootstrap
+    # script (see its header).
+    # image: fkurevija/blissful:latest
 
     container_name: blissful
 

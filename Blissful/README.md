@@ -18,7 +18,11 @@ YouTube and YouTube Music regularly return **HTTP 403** to a bare yt-dlp install
 
 **Building from this repository fixes both automatically.** The Dockerfile bakes in Deno 2.x, `yt-dlp>=2026.10.26` and `bgutil-ytdlp-pot-provider>=2.0.2`; `yt-dlp.conf` points at `/usr/local/bin/deno` and `http://blissful-pot:4416`; and `docker-compose.yml` starts the sidecar on the **same Docker network** with no published host port. Just `docker compose up -d --build` — no manual patching, no bind-mounting a patched Python file.
 
-**Using an image built from an older release rather than this fork?** Bootstrap the runtime once into your persistent downloads directory:
+**Using the image published from this fork (`fkurevija/blissful:latest`)?** It
+already contains Deno and the PO-token plugin; just run this repo's Compose file
+so the `blissful-pot` sidecar is present.
+
+**Using an older image not built from this fork?** Bootstrap the runtime once into your persistent downloads directory:
 
 ```bash
 docker cp scripts/setup-ytdlp-runtime.sh blissful:/tmp/setup-ytdlp-runtime.sh
@@ -174,12 +178,12 @@ docker compose logs -f blissful
 docker compose logs -f blissful-pot
 ```
 
-The compose file also includes a commented `image:` line for an image you have published from this fork
-option if you prefer the published image.
+The compose file also includes a commented `image: fkurevija/blissful:latest`
+line if you prefer the CI-published image over building locally.
 
-### Using the published image
+### Using an older image (not built from this fork)
 
-The published image does **not** ship Deno or the PO-token provider. Bootstrap
+Older images do **not** ship Deno or the PO-token provider. Bootstrap
 them once into your persistent downloads directory:
 
 ```bash
@@ -255,7 +259,7 @@ Blissful/
 ├── entrypoint.sh         # Fixes bind-mount ownership, drops to PUID:PGID
 ├── requirements.txt      # yt-dlp>=2026.10.26, bgutil-ytdlp-pot-provider>=2.0.2
 ├── scripts/
-│   └── setup-ytdlp-runtime.sh  # Bootstrap for the published image
+│   └── setup-ytdlp-runtime.sh  # Bootstrap for older images without the runtime
 ├── extend/               # Modular managers
 │   ├── config_manager.py
 │   ├── download_manager.py

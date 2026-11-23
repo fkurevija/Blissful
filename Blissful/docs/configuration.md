@@ -377,9 +377,9 @@ image, so **YouTube and YouTube Music 403s are fixed automatically**. The
 `blissful-pot` service must be on the **same Docker network** as Blissful —
 it has no published host port and is addressed by service name.
 
-When using the published image, run `scripts/setup-ytdlp-runtime.sh` once; it
-writes the equivalent config using your `POT_PROVIDER_URL` and the local Deno
-path. All values are overridable: edit the host `yt-dlp.conf`, pass
+The fork's published image (`fkurevija/blissful:latest`) already contains the
+runtime. Only older images need `scripts/setup-ytdlp-runtime.sh` once; it writes
+the equivalent config using your `POT_PROVIDER_URL` and the local Deno path. All values are overridable: edit the host `yt-dlp.conf`, pass
 `--config-location`, or set the environment variables above.
 
 Verify with `curl -s http://localhost:7373/api/health` — the runtime update

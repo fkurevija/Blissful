@@ -1,9 +1,10 @@
 #!/bin/sh
-# Idempotent runtime bootstrap for the PUBLISHED Blissful image
-# (an image built from an older release rather than this fork).
+# Idempotent runtime bootstrap for an older Blissful image that was NOT built
+# from this fork.
 #
-# The repo-built image already contains Deno 2.x, yt-dlp>=2026.10.26 and
-# bgutil-ytdlp-pot-provider>=2.0.2. The published image does not, so this
+# Both the repo-built and CI-published fork images already contain Deno 2.x,
+# yt-dlp>=2026.10.26 and bgutil-ytdlp-pot-provider>=2.0.2. Older images do not,
+# so this
 # script installs them into a PERSISTENT downloads directory that survives
 # container recreation, and writes a matching yt-dlp.conf.
 #

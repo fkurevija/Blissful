@@ -103,7 +103,8 @@ docker compose logs -f blissful-pot
 shared `blissful-network`, mounts `yt-dlp.conf` read-only, and maps the music
 library at `/media/Music`. The `blissful-pot` service publishes no host port.
 
-**Alternative: use an image you have published from this fork**:
+**Alternative: use the image published from this fork**
+(`fkurevija/blissful:latest`, built by GitHub Actions):
 
 ```bash
 # In docker-compose.yml, comment out `build: .` and uncomment `image:`
@@ -331,8 +332,8 @@ docker compose ps
 docker compose logs blissful-pot
 ```
 
-If `js_runtime_available` is false, run the bootstrap script (published image)
-or rebuild from the repo. If `pot_provider_reachable` is false, confirm both
+If `js_runtime_available` is false, pull/rebuild from this fork (the runtime is
+baked in), or run the bootstrap script on an older image. If `pot_provider_reachable` is false, confirm both
 containers use `blissful-network` and that `yt-dlp.conf` is mounted at
 `/app/downloads/yt-dlp.conf`.
 
