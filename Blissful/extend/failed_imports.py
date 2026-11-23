@@ -424,8 +424,8 @@ class FailedImportsRetry:
         return entries
 
     # ----------------------------------------------------------------- polling
-    def _poll_job(self, job_id):
-        deadline = time.monotonic() + _JOB_TIMEOUT_S
+    def _poll_job(self, job_id, progress=None, timeout_s=None):
+        deadline = time.monotonic() + (timeout_s or _JOB_TIMEOUT_S)
         last = {}
         while time.monotonic() < deadline:
             try:
@@ -433,6 +433,11 @@ class FailedImportsRetry:
             except Exception as exc:
                 return {'status': 'failed', 'failure_reason': str(exc)}
             status = _lower(last.get('status'))
+            if progress:
+                try:
+                    progress('download job running', job_status=status or 'pending')
+                except Exception:
+                    pass
             if status in _JOB_TERMINAL:
                 return last
             time.sleep(_POLL_INTERVAL_S)
@@ -455,7 +460,7 @@ class FailedImportsRetry:
     # -------------------------------------------------------------- gap fill
     def gapfill_album(self, aid, apply=True, state=None, naming_config=None,
                       extension=None, source='failed-imports',
-                      respect_state=True):
+                      respect_state=True, progress=None, timeout_s=None):
         """Run the full Blissful gap-fill for one album.
 
         This is the shared engine behind ``--retry-failed-imports`` and stale
@@ -464,6 +469,20 @@ class FailedImportsRetry:
         """
         entry = self._album_report(aid)
         client = self._get_client()
+
+        def report_phase(phase, **details):
+            if progress:
+                try:
+                    progress(phase, **details)
+                except Exception:
+                    pass
+
+        if timeout_s is None:
+            try:
+                minutes = int(self._config().get('gapfill_job_timeout_minutes', 15) or 15)
+            except (TypeError, ValueError):
+                minutes = 15
+            timeout_s = max(60, minutes * 60)
         if client is None:
             entry.update(status='skipped', reason='Lidarr client unavailable')
             return entry
@@ -504,6 +523,7 @@ class FailedImportsRetry:
             missing = [t for t in tracks
                        if isinstance(t, dict) and not t.get('hasFile')]
             entry['missing'] = len(missing)
+            report_phase('preparing download', missing=len(missing))
             if not missing:
                 entry.update(status='skipped', reason='no missing tracks')
                 return entry
@@ -540,12 +560,15 @@ class FailedImportsRetry:
                              reason='enqueue error: %s' % str(exc)[:200])
                 return entry
             job_id = (job or {}).get('id') if isinstance(job, dict) else None
+            report_phase('download job queued', tracks=len(payload_tracks),
+                         job_id=job_id)
             if not job_id:
                 entry.update(status='failed',
                              reason='enqueue returned no job id')
                 return entry
 
-            finished = self._poll_job(job_id)
+            finished = self._poll_job(job_id, progress=report_phase,
+                                       timeout_s=timeout_s)
             if _lower(finished.get('status')) != 'succeeded':
                 reason = (finished.get('failure_reason')
                           or finished.get('message')
@@ -561,7 +584,10 @@ class FailedImportsRetry:
 
             accepted = []
             rejected = []
-            for payload_track in payload_tracks:
+            report_phase('verifying files', files=len(payload_tracks))
+            for index, payload_track in enumerate(payload_tracks, 1):
+                report_phase('verifying files', verified=index,
+                             total=len(payload_tracks))
                 track_title = str(payload_track.get('title') or '')
                 lidarr_path = payload_track.get('target_path') or ''
                 host_path = self._host_path(lidarr_path)
@@ -593,6 +619,7 @@ class FailedImportsRetry:
                 entry.update(status='failed', reason=reason[:300])
                 return entry
 
+            report_phase('linking tracks with Lidarr', files=len(accepted))
             artist_id = artist_obj.get('id') or album.get('artistId')
             files = [{
                 'path': item.get('target_path'),
@@ -626,6 +653,7 @@ class FailedImportsRetry:
                 return entry
 
             entry['imported'] = len(files)
+            report_phase('import complete', imported=len(files))
             entry.update(status='succeeded', reason='')
             state[str(aid)] = {
                 'timestamp': time.strftime('%Y-%m-%dT%H:%M:%S'),

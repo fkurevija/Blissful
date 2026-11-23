@@ -95,8 +95,12 @@ async function pollWantedProgress(id, label) {
             if (active && active.kind === 'cleanup') {
                 detail = active.phase || 'searching';
                 const parts = [];
-                for (const key of ['scanned', 'searched', 'imported', 'deleted']) {
-                    if (active[key] !== undefined) parts.push(`${key} ${active[key]}`);
+                for (const key of ['album', 'missing', 'job_status', 'tracks',
+                                   'verified', 'total', 'files', 'searched',
+                                   'imported', 'deleted']) {
+                    if (active[key] !== undefined && active[key] !== null) {
+                        parts.push(`${key} ${active[key]}`);
+                    }
                 }
                 if (parts.length) detail += ' · ' + parts.join(', ');
             }

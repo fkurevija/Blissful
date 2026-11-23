@@ -115,7 +115,11 @@ class WantedSearchService:
                     'reason': 'Blissful gap-fill engine unavailable'}
         engine = getattr(self.gapfill, 'gapfill_album', None)
         if callable(engine):
-            return engine(album_id, apply=apply, source='stale-cleanup')
+            def progress(phase, **details):
+                self._set_active(phase=phase, album=album_id, **details)
+
+            return engine(album_id, apply=apply, source='stale-cleanup',
+                          progress=progress)
         if callable(self.gapfill):
             return self.gapfill(album_id, apply=apply)
         return {'status': 'failed', 'reason': 'Blissful gap-fill engine unavailable'}
@@ -712,6 +716,10 @@ class WantedSearchService:
                         'title': title,
                         'status': 'deleted',
                     }
+                self._set_active(deleted=len(report['deleted']),
+                                 kept=len(report['kept']),
+                                 errors=len(report['errors']),
+                                 skipped=len(report['skipped']))
             except Exception as exc:
                 # Never let one bad album abort the whole cleanup run.
                 report['errors'].append(self._safe_error(exc))

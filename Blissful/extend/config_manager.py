@@ -57,6 +57,7 @@ class ConfigManager:
             'WANTED_SEARCH_ENABLED': 'wanted_search_enabled',
             'STALE_CLEANUP_ENABLED': 'stale_cleanup_enabled',
             'PREFER_BLISSFUL_FOR_STALE': 'prefer_blissful_for_stale',
+            'GAPFILL_JOB_TIMEOUT_MINUTES': 'gapfill_job_timeout_minutes',
             'SPOTIFY_CLIENT_ID': 'spotify_client_id',
             'SPOTIFY_CLIENT_SECRET': 'spotify_client_secret',
             'POT_PROVIDER_URL': 'pot_provider_url',
@@ -132,6 +133,7 @@ class ConfigManager:
             'stale_cleanup_interval_hours': 6,
             'stale_cleanup_wait_minutes': 10,
             'prefer_blissful_for_stale': True,
+            'gapfill_job_timeout_minutes': 15,
             # Request system defaults
             'enable_requests': False,
             'auto_monitor_requests': False,
@@ -338,7 +340,8 @@ class ConfigManager:
             except (ValueError, TypeError):
                 pass
         for key, minimum in (('stale_cleanup_interval_hours', 1),
-                             ('stale_cleanup_wait_minutes', 1)):
+                             ('stale_cleanup_wait_minutes', 1),
+                             ('gapfill_job_timeout_minutes', 1)):
             if key in config:
                 try:
                     value = int(config[key])

@@ -366,6 +366,7 @@ export LIDARR_API_KEY=your-key
 | `WANTED_SEARCH_ENABLED` | `false` | Enables the Wanted tab search endpoints |
 | `STALE_CLEANUP_ENABLED` | `false` | Enables the scheduled stale-torrent cleanup worker |
 | `PREFER_BLISSFUL_FOR_STALE` | `true` | Use Blissful's gap-fill instead of Lidarr `AlbumSearch` for stale items |
+| `GAPFILL_JOB_TIMEOUT_MINUTES` | `15` | How long to wait for a multi-track gap-fill job before moving on |
 
 #### **YouTube / YouTube Music 403 configuration**
 

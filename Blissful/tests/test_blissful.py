@@ -543,6 +543,7 @@ def test_config_has_wanted_search_defaults(tmp_path):
     assert cfg['stale_cleanup_interval_hours'] == 6
     assert cfg['stale_cleanup_wait_minutes'] == 10
     assert cfg['prefer_blissful_for_stale'] is True
+    assert cfg['gapfill_job_timeout_minutes'] == 15
 
 
 def test_lidarr_wanted_and_queue_delete(monkeypatch):
@@ -673,7 +674,7 @@ def test_stale_cleanup_deletes_only_after_import(tmp_path, monkeypatch):
             return {'success': True}
 
     class Gapfill:
-        def gapfill_album(self, aid, apply=True, source=''):
+        def gapfill_album(self, aid, apply=True, source='', progress=None):
             calls.append(('gapfill', aid, apply, source))
             return {'status': 'succeeded', 'imported': 1}
 
@@ -833,3 +834,30 @@ def test_stale_cleanup_can_use_lidarr_search_when_flag_false(tmp_path, monkeypat
     report = svc.cleanup_stale(apply=True, wait_minutes=1)
     assert calls[0] == ('AlbumSearch', {'albumIds': [10]})
     assert report['counts']['deleted'] == 1
+
+
+def test_gapfill_job_poll_reports_progress(monkeypatch):
+    import extend.failed_imports as failed_mod
+    from extend.failed_imports import FailedImportsRetry
+
+    monkeypatch.setattr(failed_mod.time, 'sleep', lambda *a, **k: None)
+
+    class Config:
+        def get_config(self):
+            return {'output_format': 'mp3', 'gapfill_job_timeout_minutes': 15}
+
+    class Jobs:
+        def __init__(self):
+            self.n = 0
+
+        def get_job(self, jid):
+            self.n += 1
+            return {'status': 'succeeded' if self.n > 1 else 'running'}
+
+    phases = []
+    svc = FailedImportsRetry(Config(), object(), None, None, Jobs())
+    result = svc._poll_job('job-1',
+                           progress=lambda phase, **kw: phases.append(phase),
+                           timeout_s=5)
+    assert result['status'] == 'succeeded'
+    assert 'download job running' in phases
