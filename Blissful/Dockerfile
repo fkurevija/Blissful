@@ -20,9 +20,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Deno 2.x - JavaScript runtime yt-dlp uses for YouTube's JS challenges.
 ARG DENO_VERSION=2.9.8
-ARG TARGETARCH=amd64
+ARG TARGETARCH
 RUN set -eux; \
-    case "${TARGETARCH}" in \
+    case "$(dpkg --print-architecture)" in \
         amd64) deno_target="x86_64-unknown-linux-gnu" ;; \
         arm64) deno_target="aarch64-unknown-linux-gnu" ;; \
         *) echo "Unsupported architecture: ${TARGETARCH}" >&2; exit 1 ;; \
