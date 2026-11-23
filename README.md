@@ -161,22 +161,18 @@ PO-token plugin; still start `blissful-pot` from this repo's Compose file.
 
 ### Publishing images (maintainers)
 
-`.github/workflows/docker-publish.yml` builds `fkurevija/blissful` for linux/amd64
+`.github/workflows/docker-publish.yml` builds `<DOCKERHUB_USERNAME>/blissful` for linux/amd64
 and linux/arm64 on pushes to `master`, on `v*` tags and via `workflow_dispatch`.
 Pull requests build only, without pushing. Create a Docker Hub access token with
-**Read/Write** scope, then add the token secret from a checkout of your fork
-(locally, never in chat):
+**Read/Write** scope, then add **both** required repository secrets from a
+checkout of your fork (locally, never in chat):
 
 ```bash
+gh secret set DOCKERHUB_USERNAME -b "<your Docker Hub username>"
 gh secret set DOCKERHUB_TOKEN -b "<your Docker Hub access token>"
 ```
 
-`DOCKERHUB_USERNAME` is optional — the workflow defaults to `fkurevija`. If your
-Docker Hub username differs, set it too:
-
-```bash
-gh secret set DOCKERHUB_USERNAME -b "<dockerhub-username>"
-```
+The workflow fails fast if either secret is missing.
 
 Tags are `latest` on `master`, plus branch/semver/SHA tags. The image contains
 Deno + the PO-token plugin; run the `blissful-pot` sidecar from this repo's
