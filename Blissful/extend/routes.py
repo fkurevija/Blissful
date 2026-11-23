@@ -397,6 +397,7 @@ def register_routes(app, config_manager, lidarr_client, download_manager,
             'stale_cleanup_wait_minutes': config.get('stale_cleanup_wait_minutes', 10),
             'prefer_blissful_for_stale': bool(config.get('prefer_blissful_for_stale', True)),
             'gapfill_job_timeout_minutes': config.get('gapfill_job_timeout_minutes', 15),
+            'stale_cleanup_remove_from_client': bool(config.get('stale_cleanup_remove_from_client', True)),
             'active': (wanted_search.get_active() if wanted_search else None),
             'last_activity': (wanted_search.get_last_activity()
                               if wanted_search else None),

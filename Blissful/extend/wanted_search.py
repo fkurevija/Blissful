@@ -721,8 +721,10 @@ class WantedSearchService:
                     record_id = record.get('id')
                     try:
                         client.delete_queue_item(
-                            record_id, delete_files=False,
-                            add_import_exclusion=False)
+                            record_id,
+                            remove_from_client=bool(self._config().get(
+                                'stale_cleanup_remove_from_client', True)),
+                            blocklist=False, skip_redownload=True)
                     except Exception as exc:
                         report['errors'].append(self._safe_error(exc))
                         report['kept'].append(record_id)

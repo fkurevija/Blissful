@@ -51,6 +51,12 @@ If the gap-fill or import does not complete, the queue entry is **kept** with
 the reported reason and the run continues to the next album. Nothing is deleted
 from disk by this feature.
 
+With **Let Lidarr remove the torrent from the download client** enabled (default),
+deleting the queue item also asks Lidarr to remove the torrent and its data from
+qBittorrent, exactly as deleting the item in Lidarr's UI does; `skipRedownload`
+is set so Lidarr does not immediately re-search it. Turn it off to remove only
+the Lidarr queue entry and leave qBittorrent untouched.
+
 ## CLI equivalents
 
 ```bash

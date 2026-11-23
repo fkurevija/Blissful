@@ -544,6 +544,7 @@ def test_config_has_wanted_search_defaults(tmp_path):
     assert cfg['stale_cleanup_wait_minutes'] == 10
     assert cfg['prefer_blissful_for_stale'] is True
     assert cfg['gapfill_job_timeout_minutes'] == 15
+    assert cfg['stale_cleanup_remove_from_client'] is True
 
 
 def test_lidarr_wanted_and_queue_delete(monkeypatch):
@@ -572,15 +573,15 @@ def test_lidarr_wanted_and_queue_delete(monkeypatch):
     monkeypatch.setattr('requests.delete', fake_delete)
     client = LidarrClient('http://lidarr:8686', 'key')
     client.get_wanted_missing(page=2, page_size=50)
-    result = client.delete_queue_item(123, delete_files=False,
-                                      add_import_exclusion=False)
+    result = client.delete_queue_item(123)
     assert result['success'] is True
     assert calls[0] == ('get', {'page': 2, 'pageSize': 50,
                                 'sortKey': 'releaseDate',
                                 'sortDirection': 'descending'})
     assert calls[1][0] == 'delete'
     assert calls[1][1].endswith('/api/v1/queue/123')
-    assert calls[1][2] == {'deleteFiles': False, 'addImportExclusion': False}
+    assert calls[1][2] == {'removeFromClient': True, 'blocklist': False,
+                           'skipRedownload': True, 'changeCategory': False}
 
 
 def _wanted_service(tmp_path, enabled=True, client=None, gapfill=None,
@@ -666,9 +667,8 @@ def test_stale_cleanup_deletes_only_after_import(tmp_path, monkeypatch):
         def get_command(self, cid):
             return {'id': cid, 'status': 'completed'}
 
-        def delete_queue_item(self, rid, delete_files=False,
-                              add_import_exclusion=False):
-            calls.append(('delete', rid, delete_files, add_import_exclusion))
+        def delete_queue_item(self, rid, **kwargs):
+            calls.append(('delete', rid, kwargs))
             return {'success': True}
 
     class Gapfill:
@@ -689,7 +689,7 @@ def test_stale_cleanup_deletes_only_after_import(tmp_path, monkeypatch):
     assert applied['counts']['deleted'] == 1
     assert calls[0] == ('gapfill', 10, True, 'stale-cleanup')
     assert not any(c[0] == 'search' for c in calls)
-    assert ('delete', 11, False, False) in calls
+    assert calls[-1][0] == 'delete' and calls[-1][1] == 11
 
     again = svc.cleanup_stale(apply=True, wait_minutes=1)
     assert again['counts']['deleted'] == 0

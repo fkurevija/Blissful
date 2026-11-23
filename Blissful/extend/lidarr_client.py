@@ -735,16 +735,21 @@ class LidarrClient:
             logger.error(f"Error getting wanted/missing: {exc}")
             return {'records': [], 'totalRecords': 0}
 
-    def delete_queue_item(self, queue_id, delete_files: bool = False,
-                          add_import_exclusion: bool = False) -> Dict:
-        """Remove an item from Lidarr's Activity Queue (never deletes files)."""
+    def delete_queue_item(self, queue_id, remove_from_client: bool = True,
+                          blocklist: bool = False,
+                          skip_redownload: bool = True,
+                          change_category: bool = False) -> Dict:
+        """Remove a queue item; by default Lidarr also removes it from the
+        download client (qBittorrent) and its data, like its own UI does."""
         try:
             response = requests.delete(
                 f"{self.url}/api/v1/queue/{queue_id}",
                 headers=self.headers,
                 params={
-                    'deleteFiles': bool(delete_files),
-                    'addImportExclusion': bool(add_import_exclusion)
+                    'removeFromClient': bool(remove_from_client),
+                    'blocklist': bool(blocklist),
+                    'skipRedownload': bool(skip_redownload),
+                    'changeCategory': bool(change_category)
                 },
                 timeout=30
             )
