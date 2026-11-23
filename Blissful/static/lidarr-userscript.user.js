@@ -58,6 +58,7 @@
     // Configuration
     let CONFIG = {
         microserviceUrl: 'http://localhost:7373',
+        authToken: '__BLISSFUL_AUTH_TOKEN__',
         autoRetry: true,
         showNotifications: true
     };
@@ -65,7 +66,8 @@
     // Load config asynchronously
     async function loadConfig() {
         try {
-            CONFIG.microserviceUrl = await GM_API.getValue('microserviceUrl', 'http://localhost:7373');
+            CONFIG.microserviceUrl = await GM_API.getValue('microserviceUrl', CONFIG.microserviceUrl);
+            CONFIG.authToken = await GM_API.getValue('authToken', CONFIG.authToken);
             CONFIG.autoRetry = await GM_API.getValue('autoRetry', true);
             CONFIG.showNotifications = await GM_API.getValue('showNotifications', true);
             console.log('[Blissful] Using microservice URL:', CONFIG.microserviceUrl);
@@ -126,6 +128,7 @@
                 url: `${CONFIG.microserviceUrl}${endpoint}`,
                 headers: {
                     'Content-Type': 'application/json',
+                    ...(CONFIG.authToken ? { 'Authorization': `Bearer ${CONFIG.authToken}` } : {}),
                 },
                 data: data ? JSON.stringify(data) : null,
                 onload: (response) => {

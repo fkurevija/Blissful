@@ -1,408 +1,687 @@
 ﻿import yt_dlp
 import os
+import json
 import logging
 import shutil
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, Optional, Any
 import subprocess
+
+try:
+    from .bandcamp_resolver import BandcampResolver
+except (ImportError, ValueError):  # pragma: no cover - standalone module import
+    try:
+        from bandcamp_resolver import BandcampResolver
+    except ImportError:
+        BandcampResolver = None
 
 logger = logging.getLogger(__name__)
 
+_DEFAULT_POT_URL = 'http://blissful-pot:4416'
+_DEFAULT_DENO_PATH = '/usr/local/bin/deno'
+_IMAGE_SUFFIXES = ('.jpg', '.jpeg', '.png', '.webp', '.avif', '.gif')
+
+
 class DownloadManager:
     """Manager for downloading tracks using yt-dlp"""
-    
-    def __init__(self, download_dir: str = 'downloads'):
+
+    def __init__(
+        self,
+        download_dir: str = 'downloads',
+        config_manager: Any = None,
+        spotify_client: Any = None,
+    ):
         """
-        Initialize download manager
-        
+        Initialize download manager.
+
         Args:
             download_dir: Directory to store downloaded files
+            config_manager: Optional ConfigManager-compatible object/dict
+            spotify_client: Optional metadata-only SpotifyClient
         """
         self.download_dir = Path(download_dir)
         self.download_dir.mkdir(parents=True, exist_ok=True)
-        
+
         # Temporary directory for downloads
         self.temp_dir = self.download_dir / 'temp'
         self.temp_dir.mkdir(parents=True, exist_ok=True)
-    
-    def check_ytdlp(self) -> bool:
-        """
-        Check if yt-dlp is available
-        
-        Returns:
-            True if yt-dlp is available
-        """
+
+        self.config_manager = config_manager
+        self.spotify_client = spotify_client
+
+    # ------------------------------------------------------------------
+    # Configuration helpers
+    # ------------------------------------------------------------------
+    def _cfg(self, key: str, default: Any = None) -> Any:
+        """Read a setting from a ConfigManager, dict, or plain object."""
+        cm = self.config_manager
+        if cm is None:
+            return default
         try:
-            import yt_dlp
+            if hasattr(cm, 'get_setting') and callable(cm.get_setting):
+                value = cm.get_setting(key, default)
+            elif isinstance(cm, dict):
+                value = cm.get(key, default)
+            elif hasattr(cm, 'get_config') and callable(cm.get_config):
+                value = (cm.get_config() or {}).get(key, default)
+            else:
+                value = getattr(cm, key, default)
+        except Exception:
+            return default
+        return default if value is None else value
+
+    def _setting(self, key: str, env_names, default: str) -> str:
+        """Resolve a setting with environment variables taking precedence."""
+        for env_name in env_names:
+            value = os.environ.get(env_name)
+            if value is not None and str(value).strip():
+                return str(value).strip()
+        value = self._cfg(key, None)
+        if value is not None and str(value).strip():
+            return str(value).strip()
+        return default
+
+    @staticmethod
+    def _as_bool(value: Any, default: bool = True) -> bool:
+        if value is None:
+            return default
+        if isinstance(value, bool):
+            return value
+        text = str(value).strip().lower()
+        if text in ('false', '0', 'no', 'off', ''):
+            return False
+        if text in ('true', '1', 'yes', 'on'):
+            return True
+        return default
+
+    @staticmethod
+    def _parse_js_runtimes(raw: Any) -> Optional[Dict]:
+        """Parse YT_DLP_JS_RUNTIMES (JSON object or 'deno:/x,node' list)."""
+        if raw is None:
+            return None
+        text = str(raw).strip()
+        if not text:
+            return None
+        result: Dict[str, Dict] = {}
+
+        if text.startswith('{'):
+            data = None
+            try:
+                data = json.loads(text)
+            except (ValueError, TypeError):
+                pass
+            if isinstance(data, dict):
+                for name, value in data.items():
+                    name = str(name).strip()
+                    if not name:
+                        continue
+                    if isinstance(value, dict):
+                        result[name] = dict(value)
+                    elif isinstance(value, str) and value.strip():
+                        result[name] = {'path': value.strip()}
+                    else:
+                        result[name] = {}
+                return result or None
+
+        for token in text.split(','):
+            token = token.strip()
+            if not token:
+                continue
+            if ':' in token:
+                name, path = token.split(':', 1)
+                name, path = name.strip(), path.strip()
+                if not name:
+                    continue
+                result[name] = {'path': path} if path else {}
+            else:
+                result[token] = {}
+        return result or None
+
+    # ------------------------------------------------------------------
+    # yt-dlp option construction
+    # ------------------------------------------------------------------
+    def _build_ydl_opts(self, output_template: str) -> Dict:
+        """
+        Build the shared yt-dlp option dictionary.
+
+        Mirrors the verified live setup: PO-token provider via
+        youtubepot-bgutilhttp and a deno JS runtime, both configurable.
+        """
+        codec = str(self._cfg('output_format', 'mp3') or 'mp3').strip().lower().lstrip('.')
+        if codec not in ('mp3', 'flac', 'wav', 'ogg', 'opus', 'm4a', 'aac', 'best'):
+            codec = 'mp3'
+
+        quality_raw = str(self._cfg('quality', '320') or '320').strip().lower()
+        quality = quality_raw[:-1] if quality_raw.endswith('k') else quality_raw
+        if not quality.isdigit():
+            quality = '320'
+
+        ydl_opts: Dict[str, Any] = {
+            'format': 'bestaudio/best',
+            'outtmpl': output_template,
+            'quiet': False,
+            'no_warnings': False,
+            'extract_flat': False,
+            'writethumbnail': True,
+            'postprocessors': [{
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': codec,
+                'preferredquality': quality,
+            }],
+            'prefer_ffmpeg': True,
+            'keepvideo': False,
+            'noplaylist': True,
+            # max_downloads is intentionally omitted: yt-dlp counts search +
+            # download as two downloads and raises MaxDownloadsReached.
+        }
+
+        # PO token provider (bgutil-ytdlp-pot-provider sidecar). Same options
+        # fix 403s for both YouTube and YouTube Music.
+        enable_pot = self._as_bool(self._cfg('enable_pot_provider', True), True)
+        env_pot = os.environ.get('ENABLE_POT_PROVIDER')
+        if env_pot is not None:
+            enable_pot = self._as_bool(env_pot, True)
+        pot_url = self._setting(
+            'pot_provider_url', ('POT_PROVIDER_URL',), _DEFAULT_POT_URL)
+
+        extractor_args: Dict[str, Dict] = {}
+        if enable_pot:
+            extractor_args['youtubepot-bgutilhttp'] = {'base_url': [pot_url]}
+
+        extra_args: Dict[str, Dict] = {}
+        cfg_args = self._cfg('ytdlp_extractor_args', None)
+        if isinstance(cfg_args, dict):
+            extra_args.update(cfg_args)
+        env_args_raw = os.environ.get('YT_DLP_EXTRACTOR_ARGS')
+        if env_args_raw and str(env_args_raw).strip():
+            try:
+                parsed = json.loads(env_args_raw)
+                if isinstance(parsed, dict):
+                    extra_args.update(parsed)
+                else:
+                    logger.warning('YT_DLP_EXTRACTOR_ARGS is not a JSON object; ignoring')
+            except (ValueError, TypeError):
+                logger.warning('YT_DLP_EXTRACTOR_ARGS is not valid JSON; ignoring')
+
+        for key, value in extra_args.items():
+            if not key or not isinstance(value, dict):
+                continue
+            if key == 'youtubepot-bgutilhttp':
+                # Never let extra args clobber the configured POT endpoint.
+                if enable_pot:
+                    merged = dict(value)
+                    merged['base_url'] = [pot_url]
+                    extractor_args[key] = merged
+            elif key in extractor_args and isinstance(extractor_args[key], dict):
+                nested = dict(extractor_args[key])
+                nested.update(value)
+                extractor_args[key] = nested
+            else:
+                extractor_args[key] = dict(value)
+
+        if extractor_args:
+            ydl_opts['extractor_args'] = extractor_args
+
+        # JavaScript runtime needed by current yt-dlp challenge solvers.
+        js_runtimes = self._parse_js_runtimes(os.environ.get('YT_DLP_JS_RUNTIMES'))
+        if js_runtimes is None:
+            deno_path = os.path.expanduser(
+                self._setting('deno_path', ('DENO_PATH',), _DEFAULT_DENO_PATH))
+            if not os.path.isfile(deno_path):
+                found = shutil.which('deno')
+                if found:
+                    deno_path = found
+            if os.path.isfile(deno_path):
+                js_runtimes = {'deno': {'path': deno_path}}
+        if js_runtimes:
+            ydl_opts['js_runtimes'] = js_runtimes
+
+        # Optional explicit yt-dlp config file; leave YT_DLP_HOME alone when
+        # unset (no config_paths key added).
+        config_file = os.environ.get('YT_DLP_CONFIG_FILE') or self._cfg('ytdlp_config_file', None)
+        if config_file:
+            ydl_opts['config_paths'] = [os.path.expanduser(str(config_file))]
+
+        return ydl_opts
+
+    # ------------------------------------------------------------------
+    # Public API
+    # ------------------------------------------------------------------
+    def check_ytdlp(self) -> bool:
+        """Check if yt-dlp is available"""
+        try:
+            import yt_dlp  # noqa: F401
             return True
         except ImportError:
             return False
-    
+
+    @staticmethod
+    def is_duration_acceptable(actual, expected, tolerance: float = 0.10) -> bool:
+        """
+        Return True when ``actual`` is within ``tolerance`` (fraction) of
+        ``expected``. An unknown duration cannot prove a mismatch, so it is
+        accepted; no expectation at all always accepts.
+        """
+        if expected is None or actual is None:
+            return True
+        try:
+            actual_value = float(actual)
+            expected_value = float(expected)
+            tolerance_value = float(tolerance)
+        except (TypeError, ValueError):
+            return True
+        if expected_value <= 0:
+            return True
+        return abs(actual_value - expected_value) <= tolerance_value * expected_value
+
     def download_track(
         self,
         artist: str,
         title: str,
         album: str = '',
         output_format: str = 'mp3',
-        source_priorities: list = None
+        source_priorities: list = None,
+        expected_duration=None,
     ) -> Dict:
         """
-        Download a track based on metadata
-        
+        Download a track based on metadata.
+
         Args:
             artist: Artist name
             title: Track title
             album: Album name (optional)
             output_format: Desired output format
             source_priorities: Optional list of source priorities
-            
+            expected_duration: Expected track length in seconds (optional)
+
         Returns:
-            Dict with success status and file path or error
+            Dict with success status, file path, duration, thumbnail path or error
         """
         try:
-            # Construct search query
             search_query = f"{artist} - {title}"
             if album:
                 search_query = f"{artist} - {album} - {title}"
-            
+
+            if self._as_bool(self._cfg('spotify_metadata_enabled', False), False) \
+                    and self.spotify_client is not None:
+                duration_ms = None
+                if expected_duration is not None:
+                    try:
+                        duration_ms = int(float(expected_duration) * 1000)
+                    except (TypeError, ValueError):
+                        duration_ms = None
+                metadata = None
+                try:
+                    metadata = self.spotify_client.resolve_track(
+                        artist, title, album=album or None, duration_ms=duration_ms)
+                except Exception:
+                    logger.debug('Spotify metadata lookup unavailable; using plain query')
+                if metadata:
+                    try:
+                        refined = self.spotify_client.build_search_query(metadata)
+                        if refined:
+                            search_query = refined
+                    except Exception:
+                        logger.debug('Could not build Spotify-backed search query')
+
             logger.info(f"Searching for: {search_query}")
-            
-            # Build source list based on priorities
+
             if source_priorities:
                 sources = self._build_source_list(search_query, source_priorities)
             else:
-                # Default fallback sources
                 sources = [
                     f"ytsearch1:{search_query}",  # YouTube search
                     f"scsearch1:{search_query}",  # SoundCloud search
                 ]
-            
+
+            tolerance = self._duration_tolerance()
             downloaded_file = None
+            final_duration = None
+            final_thumbnail = None
             last_error = None
-            
+
             for source in sources:
                 try:
                     logger.info(f"Trying source: {source}")
-                    result = self._download_from_source(source, artist, title)
-                    
-                    if result['success']:
-                        downloaded_file = result['file_path']
-                        break
-                    else:
-                        last_error = result.get('error')
-                        
+                    result = self._download_from_source(
+                        source, artist, title, expected_duration=expected_duration)
+
+                    if not result or not result.get('success'):
+                        last_error = (result or {}).get('error')
+                        continue
+
+                    duration = result.get('duration')
+                    if expected_duration is not None and not self.is_duration_acceptable(
+                            duration, expected_duration, tolerance):
+                        rejected = result.get('file_path')
+                        if rejected:
+                            self._delete_file(rejected)
+                        logger.warning(
+                            'Rejected candidate from %s: duration %s outside tolerance of %ss',
+                            source, duration, expected_duration)
+                        last_error = 'Duration mismatch'
+                        continue
+
+                    downloaded_file = result.get('file_path')
+                    final_duration = duration
+                    final_thumbnail = result.get('thumbnail_path')
+                    break
+
                 except Exception as e:
                     logger.warning(f"Failed to download from source {source}: {e}")
                     last_error = str(e)
                     continue
-            
+
             if downloaded_file:
                 return {
                     'success': True,
                     'file_path': downloaded_file,
                     'artist': artist,
-                    'title': title
+                    'title': title,
+                    'duration': final_duration,
+                    'thumbnail_path': final_thumbnail,
                 }
-            else:
-                return {
-                    'success': False,
-                    'error': last_error or 'Could not find track from any source'
-                }
-                
+
+            return {
+                'success': False,
+                'error': last_error or 'Could not find track from any source',
+                'duration': None,
+                'thumbnail_path': None,
+            }
+
         except Exception as e:
             logger.error(f"Error downloading track: {e}", exc_info=True)
             return {
                 'success': False,
-                'error': str(e)
+                'error': str(e),
+                'duration': None,
+                'thumbnail_path': None,
             }
-    
+
+    def _duration_tolerance(self) -> float:
+        raw = self._cfg('max_duration_deviation', 0.10)
+        try:
+            tolerance = float(raw)
+        except (TypeError, ValueError):
+            tolerance = 0.10
+        if tolerance < 0:
+            tolerance = 0.10
+        if tolerance > 1:
+            tolerance = tolerance / 100.0
+        return tolerance
+
+    @staticmethod
+    def _delete_file(path):
+        try:
+            if path and os.path.isfile(path):
+                os.remove(path)
+        except OSError:
+            logger.debug('Could not remove rejected file: %s', path)
+
+    # ------------------------------------------------------------------
+    # Source construction
+    # ------------------------------------------------------------------
     def _build_source_list(self, search_query: str, priorities: list) -> list:
         """
-        Build ordered source list based on priorities
-        
-        Args:
-            search_query: The search query string
-            priorities: List of source priority dicts
-            
-        Returns:
-            List of yt-dlp source strings
+        Build ordered source list based on priorities.
+
+        Spotify is a metadata provider only - it is never a download source
+        and never falls back to a YouTube search here.
         """
         sources = []
-        
+
         for priority in priorities:
             if not priority.get('enabled', True):
                 continue
-            
+
             name = priority.get('name', '').lower()
             search = priority.get('search', '').lower()
-            
-            # YouTube and YouTube Music
+
+            # YouTube and YouTube Music share the same yt-dlp options.
             if 'youtube' in name or 'youtube.com' in search:
                 if 'music' in name or 'music.youtube' in search:
-                    sources.append(f"ytsearch1:'{search_query}' site:music.youtube.com")
+                    clean_query = search_query.replace('"', '').replace("'", '').strip()
+                    sources.append(f"ytsearch1:{clean_query} site:music.youtube.com")
                 else:
                     sources.append(f"ytsearch1:{search_query}")
-            
+
             # SoundCloud
             elif 'soundcloud' in name or 'soundcloud.com' in search:
                 sources.append(f"scsearch1:{search_query}")
-            
-            # Bandcamp
+
+            # Bandcamp: resolved to a real track/album URL at download time.
             elif 'bandcamp' in name or 'bandcamp.com' in search:
-                sources.append(f"https://bandcamp.com/search?q={search_query.replace(' ', '+')}")
-            
-            # Spotify
+                sources.append(f"bandcamp:{search_query}")
+
+            # Spotify: metadata only - intentionally no download source here.
             elif 'spotify' in name or 'spotify.com' in search:
-                sources.append(f"spsearch:{search_query}")
-                # Add YouTube fallback for Spotify
-                sources.append(f"ytsearch1:{search_query} audio")
-            
+                continue
+
             # Apple Music
             elif 'apple' in name or 'apple.com' in search:
-                # Apple Music extraction, then fallback to YouTube
                 sources.append(f"ytsearch1:{search_query} apple music")
-            
+
             # Deezer
             elif 'deezer' in name or 'deezer.com' in search:
                 sources.append(f"dzsearch:{search_query}")
                 sources.append(f"ytsearch1:{search_query} deezer")
-            
+
             # Tidal
             elif 'tidal' in name or 'tidal.com' in search:
                 sources.append(f"ytsearch1:{search_query} tidal")
-            
+
             # Mixcloud
             elif 'mixcloud' in name or 'mixcloud.com' in search:
                 sources.append(f"https://www.mixcloud.com/search/?q={search_query.replace(' ', '+')}")
-            
+
             # Archive.org
             elif 'archive' in name or 'archive.org' in search:
                 sources.append(f"https://archive.org/search.php?query={search_query.replace(' ', '+')}&and[]=mediatype:audio")
-            
+
             # Jamendo
             elif 'jamendo' in name or 'jamendo.com' in search:
                 sources.append(f"ytsearch1:{search_query} jamendo")
-            
+
             # Free Music Archive
             elif 'freemusicarchive' in name or 'freemusicarchive.org' in search:
                 sources.append(f"ytsearch1:{search_query} free music archive")
-            
+
             # Audiomack
             elif 'audiomack' in name or 'audiomack.com' in search:
                 sources.append(f"https://audiomack.com/search?q={search_query.replace(' ', '+')}")
-            
+
             # Vimeo
             elif 'vimeo' in name or 'vimeo.com' in search:
                 sources.append(f"https://vimeo.com/search?q={search_query.replace(' ', '+')}")
-            
+
             # Dailymotion
             elif 'dailymotion' in name or 'dailymotion.com' in search:
                 sources.append(f"https://www.dailymotion.com/search/{search_query.replace(' ', '+')}")
-            
+
             # TikTok
             elif 'tiktok' in name or 'tiktok.com' in search:
                 sources.append(f"ytsearch1:{search_query} tiktok")
-            
+
             # Reverbnation
             elif 'reverbnation' in name or 'reverbnation.com' in search:
                 sources.append(f"ytsearch1:{search_query} reverbnation")
-        
+
         # If no sources were added, add default fallbacks
         if not sources:
             sources = [
                 f"ytsearch1:{search_query}",
                 f"scsearch1:{search_query}",
             ]
-        
+
         return sources
-    
-    def _download_from_source(self, source: str, artist: str, title: str) -> Dict:
-        """
-        Download from a specific source
-        
-        Args:
-            source: yt-dlp source string
-            artist: Artist name
-            title: Track title
-            
-        Returns:
-            Dict with success status and file path
-        """
+
+    # ------------------------------------------------------------------
+    # Download execution
+    # ------------------------------------------------------------------
+    def _download_from_source(
+        self,
+        source: str,
+        artist: str,
+        title: str,
+        expected_duration=None,
+    ) -> Dict:
+        """Download from a specific source."""
         try:
+            # Bandcamp queries are resolved to a concrete track/album URL.
+            if source.startswith('bandcamp:'):
+                query = source.split(':', 1)[1].strip()
+                if BandcampResolver is None:
+                    return {'success': False, 'error': 'Bandcamp resolver unavailable'}
+                resolved = BandcampResolver().resolve(query)
+                if not resolved:
+                    return {'success': False, 'error': 'Bandcamp resolver found no track URL'}
+                logger.info(f"Resolved Bandcamp source to: {resolved}")
+                source = resolved
+
             # Sanitize filename
             safe_filename = self._sanitize_filename(f"{artist} - {title}")
             output_template = str(self.temp_dir / f"{safe_filename}.%(ext)s")
-            
-            ydl_opts = {
-                'format': 'bestaudio/best',
-                'outtmpl': output_template,
-                'quiet': False,
-                'no_warnings': False,
-                'extract_flat': False,
-                'postprocessors': [{
-                    'key': 'FFmpegExtractAudio',
-                    'preferredcodec': 'mp3',
-                    'preferredquality': '320',
-                }],
-                'prefer_ffmpeg': True,
-                'keepvideo': False,
-                'noplaylist': True,
-                # Removed max_downloads - it was causing "MaxDownloadsReached" error
-                # because yt-dlp counts search + download as 2 downloads
-            }
-            
-            # Special handling for Spotify
-            if source.startswith('spsearch:') or 'spotify.com' in source:
-                # Spotify support requires additional configuration
-                ydl_opts.update({
-                    'username': 'oauth',  # Use OAuth if configured
-                    'extract_flat': False,
-                })
-                logger.info("Using Spotify extractor")
-            
+            ydl_opts = self._build_ydl_opts(output_template)
+
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                # Extract info first to verify
+                # Extract info first to verify there is a result.
                 try:
                     info = ydl.extract_info(source, download=False)
+                    if not info or ('entries' in info and not info['entries']):
+                        return {'success': False, 'error': 'No results found'}
+
+                    info = ydl.extract_info(source, download=True)
+                    if isinstance(info, dict) and 'entries' in info:
+                        entries = info.get('entries') or []
+                        info = entries[0] if entries else None
                 except Exception as e:
-                    # If Spotify fails, return error to try next source
-                    if 'spsearch:' in source or 'spotify' in source:
-                        logger.warning(f"Spotify extraction failed: {e}")
-                        return {
-                            'success': False,
-                            'error': f'Spotify unavailable: {str(e)}'
-                        }
-                    raise
-                
-                if not info or ('entries' in info and not info['entries']):
-                    return {
-                        'success': False,
-                        'error': 'No results found'
-                    }
-                
-                # Download the first result
-                info = ydl.extract_info(source, download=True)
-                
-                # Find the downloaded file
-                if info and 'entries' in info:
-                    info = info['entries'][0]
-                
-                # The file should be in temp_dir with .mp3 extension
+                    logger.warning(f"Extraction failed for {source}: {e}")
+                    return {'success': False, 'error': str(e)}
+
+                duration, thumbnail_path = self._extract_info_fields(info, safe_filename)
+
                 expected_file = self.temp_dir / f"{safe_filename}.mp3"
-                
-                if expected_file.exists():
-                    logger.info(f"Successfully downloaded: {expected_file}")
-                    return {
-                        'success': True,
-                        'file_path': str(expected_file)
-                    }
-                else:
-                    # Try to find the file with any extension
-                    for file in self.temp_dir.glob(f"{safe_filename}.*"):
-                        logger.info(f"Found downloaded file: {file}")
-                        return {
-                            'success': True,
-                            'file_path': str(file)
-                        }
-                    
+                downloaded = expected_file if expected_file.exists() else None
+                if downloaded is None:
+                    for candidate in sorted(self.temp_dir.glob(f"{safe_filename}.*")):
+                        if candidate.suffix.lower() in _IMAGE_SUFFIXES:
+                            continue
+                        downloaded = candidate
+                        break
+
+                if downloaded is None:
                     return {
                         'success': False,
-                        'error': 'Downloaded file not found'
+                        'error': 'Downloaded file not found',
+                        'duration': duration,
+                        'thumbnail_path': thumbnail_path,
                     }
-                    
+
+                logger.info(f"Successfully downloaded: {downloaded}")
+                return {
+                    'success': True,
+                    'file_path': str(downloaded),
+                    'duration': duration,
+                    'thumbnail_path': thumbnail_path,
+                }
+
         except yt_dlp.utils.DownloadError as e:
             logger.warning(f"Download error: {e}")
-            return {
-                'success': False,
-                'error': str(e)
-            }
+            return {'success': False, 'error': str(e)}
         except Exception as e:
             logger.error(f"Unexpected error downloading: {e}", exc_info=True)
-            return {
-                'success': False,
-                'error': str(e)
-            }
-    
+            return {'success': False, 'error': str(e)}
+
+    def _extract_info_fields(self, info, safe_filename: str):
+        """Pull duration and a local thumbnail path from extraction info."""
+        duration = None
+        thumbnail_path = None
+        if not isinstance(info, dict):
+            return duration, thumbnail_path
+
+        raw_duration = info.get('duration')
+        if raw_duration is not None:
+            try:
+                parsed = float(raw_duration)
+                if parsed > 0:
+                    duration = parsed
+            except (TypeError, ValueError):
+                duration = None
+
+        thumbnails = info.get('thumbnails') or []
+        if isinstance(thumbnails, list):
+            for thumb in thumbnails:
+                if not isinstance(thumb, dict):
+                    continue
+                local = thumb.get('filepath') or thumb.get('path')
+                if local and os.path.isfile(str(local)):
+                    thumbnail_path = str(local)
+                    break
+
+        if thumbnail_path is None:
+            for suffix in _IMAGE_SUFFIXES:
+                candidate = self.temp_dir / f"{safe_filename}{suffix}"
+                if candidate.is_file():
+                    thumbnail_path = str(candidate)
+                    break
+
+        if thumbnail_path is None:
+            for candidate in sorted(self.temp_dir.glob(f"{safe_filename}.*")):
+                if candidate.suffix.lower() in _IMAGE_SUFFIXES:
+                    thumbnail_path = str(candidate)
+                    break
+
+        return duration, thumbnail_path
+
     def _sanitize_filename(self, filename: str) -> str:
-        """
-        Sanitize filename for safe file system storage
-        
-        Args:
-            filename: Original filename
-            
-        Returns:
-            Sanitized filename
-        """
-        # Remove or replace invalid characters
+        """Sanitize filename for safe file system storage"""
         invalid_chars = '<>:"/\\|?*'
         for char in invalid_chars:
             filename = filename.replace(char, '_')
-        
-        # Remove leading/trailing spaces and dots
+
         filename = filename.strip('. ')
-        
-        # Limit length
+
         if len(filename) > 200:
             filename = filename[:200]
-        
+
         return filename
-    
+
     def move_to_target(
         self,
         source_file: str,
         target_path: str,
-        path_mapping: Optional[Dict[str, str]] = None
+        path_mapping: Optional[Dict[str, str]] = None,
     ) -> str:
-        """
-        Move file to target location with path mapping
-        
-        Args:
-            source_file: Source file path
-            target_path: Target path from Lidarr
-            path_mapping: Optional path mapping dict (microservice_path -> lidarr_path)
-            
-        Returns:
-            Final file path
-        """
+        """Move file to target location with path mapping"""
         try:
             source = Path(source_file)
-            
-            # Normalize target path to use forward slashes (cross-platform)
+
             target_path = target_path.replace('\\', '/')
-            
-            # Apply path mapping if provided
+
             if path_mapping:
                 for micro_path, lidarr_path in path_mapping.items():
-                    # Normalize both paths for comparison
                     micro_path_norm = micro_path.replace('\\', '/')
                     lidarr_path_norm = lidarr_path.replace('\\', '/')
                     target_path_norm = target_path.replace('\\', '/')
-                    
+
                     if target_path_norm.startswith(lidarr_path_norm):
-                        # Replace Lidarr path with microservice path
                         target_path = target_path_norm.replace(lidarr_path_norm, micro_path_norm, 1)
                         logger.info(f"Path mapping applied: {lidarr_path_norm} -> {micro_path_norm}")
                         break
-            
-            # Convert to Path object (handles platform-specific separators)
+
             target = Path(target_path)
-            
-            # Create target directory if it doesn't exist
             target.parent.mkdir(parents=True, exist_ok=True)
-            
+
             logger.info(f"Moving file from {source} to {target}")
-            
-            # Move file
             shutil.move(str(source), str(target))
-            
+
             logger.info(f"✅ Successfully moved file to: {target}")
             return str(target)
-            
+
         except Exception as e:
             logger.error(f"❌ Error moving file to target: {e}", exc_info=True)
-            # Return source path if move failed
             return source_file
-    
+
     def cleanup_temp(self):
         """Clean up temporary download directory"""
         try:
@@ -412,19 +691,19 @@ class DownloadManager:
             logger.info("Cleaned up temporary downloads")
         except Exception as e:
             logger.error(f"Error cleaning up temp directory: {e}")
-    
+
     def get_supported_sources(self) -> list:
         """
-        Get list of supported download sources
-        
-        Returns:
-            List of supported source names
+        Get list of supported download sources.
+
+        Spotify is listed as a metadata provider only, never as a download
+        source.
         """
         return [
             'YouTube',
             'YouTube Music',
             'SoundCloud',
             'Bandcamp',
-            'Spotify (via youtube-dl extractor)',
-            'And many more supported by yt-dlp'
+            'And many more supported by yt-dlp',
+            'Spotify (metadata provider via SpotifyClient; not a download source)',
         ]

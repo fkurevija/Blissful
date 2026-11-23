@@ -9,6 +9,37 @@ A powerful microservice that automatically downloads missing music tracks for yo
 
 ---
 
+## 🔑 YouTube / YouTube Music 403s — read this first
+
+YouTube and YouTube Music regularly return **HTTP 403** to a bare yt-dlp install. Fixing it needs two things:
+
+1. **A JavaScript runtime** — Deno 2.x, which yt-dlp uses to solve YouTube's JS challenges.
+2. **A PO-token provider** — the `blissful-pot` sidecar (`brainicism/bgutil-ytdlp-pot-provider`), which supplies the proof-of-origin tokens YouTube now expects.
+
+**Building from this repository fixes both automatically.** The Dockerfile bakes in Deno 2.x, `yt-dlp>=2026.10.26` and `bgutil-ytdlp-pot-provider>=2.0.2`; `yt-dlp.conf` points at `/usr/local/bin/deno` and `http://blissful-pot:4416`; and `docker-compose.yml` starts the sidecar on the **same Docker network** with no published host port. Just `docker compose up -d --build` — no manual patching, no bind-mounting a patched Python file.
+
+**Using the published image (`angablade/blissful:latest`)?** Bootstrap the runtime once into your persistent downloads directory:
+
+```bash
+docker cp scripts/setup-ytdlp-runtime.sh blissful:/tmp/setup-ytdlp-runtime.sh
+docker exec -u 0 blissful sh /tmp/setup-ytdlp-runtime.sh
+```
+
+The script is idempotent and installs Deno + the Python packages under `YT_DLP_HOME` (default `/app/downloads/pylib`) and writes a matching `yt-dlp.conf`. See [docs/getting-started.md](docs/getting-started.md) for details.
+
+**Verify it:**
+
+```bash
+curl -s http://localhost:7373/api/health
+# With the runtime update this reports:
+#   "js_runtime_available": true,
+#   "pot_provider_reachable": true
+```
+
+> ⚠️ PO tokens **reduce** 403s but do **not guarantee** they never happen. YouTube changes its defenses; keep yt-dlp updated and expect occasional failures to fall through to your other sources.
+
+---
+
 ## 📸 Screenshots & Videos
 
 ### 🎬 Demo Videos
@@ -125,62 +156,56 @@ The application will start on **http://localhost:7373**
 
 ## 🐳 Docker
 
-### Quick Start with Docker (Recommended)
+### Quick Start with Docker Compose (Recommended)
 
-**Official Docker Image:** `angablade/blissful:latest`
-
-```bash
-# Pull and run the official image
-docker run -d \
-  --name blissful \
-  -p 7373:7373 \
-  -v $(pwd)/config.json:/app/config.json \
-  -v $(pwd)/downloads:/app/downloads \
-  angablade/blissful:latest
-```
-
-### Docker Compose
+The repository's `docker-compose.yml` builds a **self-contained** image and starts
+the `blissful-pot` PO-token sidecar on the same network. This is what fixes
+YouTube **and** YouTube Music 403s automatically.
 
 ```bash
-# Download docker-compose.yml from the repository
-# Or use this configuration:
+git clone https://github.com/angablade/blissful.git
+cd blissful/Blissful
 
-version: '3.8'
-services:
-  blissful:
-    image: angablade/blissful:latest
-    container_name: blissful
-    ports:
-      - "7373:7373"
-    volumes:
-      - ./config.json:/app/config.json
-      - ./downloads:/app/downloads
-    restart: unless-stopped
-
-# Start the container
-docker-compose up -d
+# Build from the repo (default) and start both containers
+docker compose up -d --build
 
 # View logs
-docker-compose logs -f blissful
+docker compose logs -f blissful
+docker compose logs -f blissful-pot
 ```
+
+The compose file also includes a commented `image: angablade/blissful:latest`
+option if you prefer the published image.
+
+### Using the published image
+
+The published image does **not** ship Deno or the PO-token provider. Bootstrap
+them once into your persistent downloads directory:
+
+```bash
+# Compose ships the bootstrap script in ./scripts
+docker cp scripts/setup-ytdlp-runtime.sh blissful:/tmp/setup-ytdlp-runtime.sh
+docker exec -u 0 blissful sh /tmp/setup-ytdlp-runtime.sh
+
+# Confirm the runtime is healthy
+curl -s http://localhost:7373/api/health
+# js_runtime_available: true, pot_provider_reachable: true
+```
+
+The script is safe to re-run: it skips steps already completed and honours
+`YT_DLP_HOME`, `POT_PROVIDER_URL`, `DENO_VERSION` and the `FORCE_*` overrides.
 
 ### Build from Source (Optional)
 
 ```bash
-# Clone and build locally
 git clone https://github.com/angablade/blissful.git
-cd blissful
+cd blissful/Blissful
 
-# Build the image
+# The Dockerfile installs ffmpeg, curl/unzip, Deno 2.x, yt-dlp and the
+# PO-token provider, and runs as PUID:PGID (default 1000:1000).
 docker build -t blissful .
-
-# Run the container
-docker run -d -p 7373:7373 \
-  -v $(pwd)/config.json:/app/config.json \
-  -v $(pwd)/downloads:/app/downloads \
-  --name blissful \
-  blissful
 ```
+
 
 ---
 
@@ -224,6 +249,13 @@ Use path mapping to handle Lidarr running on a different machine or Docker.
 ```
 Blissful/
 ├── Blissful.py           # Main application
+├── Dockerfile            # Self-contained image (ffmpeg, Deno, yt-dlp, PO provider)
+├── docker-compose.yml    # Blissful + blissful-pot sidecar on one network
+├── yt-dlp.conf           # Deno + PO-token provider runtime options
+├── entrypoint.sh         # Fixes bind-mount ownership, drops to PUID:PGID
+├── requirements.txt      # yt-dlp>=2026.10.26, bgutil-ytdlp-pot-provider>=2.0.2
+├── scripts/
+│   └── setup-ytdlp-runtime.sh  # Bootstrap for the published image
 ├── extend/               # Modular managers
 │   ├── config_manager.py
 │   ├── download_manager.py
@@ -277,6 +309,21 @@ Content-Type: application/json
 GET /api/health
 ```
 
+With the runtime update the response also includes:
+
+```json
+{
+  "status": "healthy",
+  "ffmpeg_available": true,
+  "ytdlp_available": true,
+  "js_runtime_available": true,
+  "pot_provider_reachable": true
+}
+```
+
+`js_runtime_available` confirms Deno is callable; `pot_provider_reachable`
+confirms Blissful can reach the `blissful-pot` sidecar on the shared network.
+
 ---
 
 ## 🔧 Configuration File
@@ -300,6 +347,17 @@ The `config.json` file stores all your settings:
 ```
 
 ---
+
+## 🔒 API security
+
+An API token is optional and off by default. Set it under **Tools → API Security**
+or with `BLISSFUL_AUTH_TOKEN` before exposing Blissful beyond LAN/VPN. With the
+token on, cross-origin API calls need `Authorization: Bearer <token>`; the
+bundled UI and `/api/health` stay public. The generated userscript carries the
+token automatically. CORS is limited to same-origin plus configured Lidarr /
+`BLISSFUL_ALLOWED_ORIGINS` origins, and the credential-returning
+`/api/get-api-key` endpoint has been removed. See
+[docs/configuration.md](docs/configuration.md#api-security-bliss-8).
 
 ## 🤝 Contributing
 

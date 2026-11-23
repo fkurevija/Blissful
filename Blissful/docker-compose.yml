@@ -1,61 +1,108 @@
-version: '3.8'
+# Blissful + PO-token provider.
+#
+# YouTube AND YouTube Music 403s are fixed automatically when building from
+# this repo: the image bakes in Deno 2.x, yt-dlp>=2026.10.26 and
+# bgutil-ytdlp-pot-provider>=2.0.2, and the blissful-pot sidecar runs on the
+# SAME Docker network at http://blissful-pot:4416 (no published host port).
+#
+# Using the published image instead? See the commented `image:` line below and
+# run scripts/setup-ytdlp-runtime.sh once against your persistent downloads dir.
 
 services:
   blissful:
-    # Official Docker image
-    image: angablade/blissful:latest
-    
-    # To build from source instead, comment above and uncomment below:
-    # build: .
-    
+    # Default: build the self-contained image from this repository.
+    build: .
+
+    # Published-image alternative: comment out `build: .` above, uncomment
+    # the line below, then bootstrap the runtime once (see script header):
+    #   docker exec -u 0 blissful sh /app/scripts/setup-ytdlp-runtime.sh
+    # image: angablade/blissful:latest
+
     container_name: blissful
+
+    # The entrypoint starts as root only to fix ownership of the bind mounts,
+    # then drops to PUID:PGID (default 1000:1000, as in the verified stack).
+    # To pin the user in Compose instead, add: user: "1000:1000"
     ports:
       - "7373:7373"
+
+    # PO-token provider must be up first; both containers share a network.
+    depends_on:
+      - blissful-pot
+
     volumes:
-      # Configuration file (will be created on first run)
+      # Configuration file (created on first run)
       - ./config.json:/app/config.json
-      
-      # Download directory
+
+      # Persistent downloads, pylib, Deno bootstrap and yt-dlp.conf
       - ./downloads:/app/downloads
-      
-      # Map to your music directory (adjust this path!)
-      # This should match where Lidarr stores music
-      - /path/to/music:/music
-      
+
+      # yt-dlp config: Deno runtime + sidecar URL (read-only by design).
+      # Override by editing the host copy.
+      - ./yt-dlp.conf:/app/downloads/yt-dlp.conf:ro
+
+      # Published-image users: uncomment to run the bootstrap in-container.
+      # - ./scripts/setup-ytdlp-runtime.sh:/app/scripts/setup-ytdlp-runtime.sh:ro
+
+      # Music library location (adjust to match your Lidarr root folder)
+      # Verified deployment mount:
+      - /mnt/Storage/Music:/media/Music
+
     environment:
-      # Application port
+      - TZ=America/Toronto
       - PORT=7373
-      
-      # Optional: Lidarr connection (can also be set in web UI)
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - PYTHONUNBUFFERED=1
+      - PYTHONPATH=/app/downloads/pylib
+      - YT_DLP_HOME=/app/downloads
+      # Set by the Dockerfile for repo builds; the bootstrap script writes the
+      # local path into yt-dlp.conf when using the published image.
+      # - DENO_PATH=/app/downloads/deno
+      - POT_PROVIDER_URL=http://blissful-pot:4416
+
+      # Optional: Lidarr connection (can also be set in the web UI)
       # - LIDARR_URL=http://lidarr:8686
       # - LIDARR_API_KEY=your-api-key-here
-      
-      # Optional: Request system (can also be set in web UI)
-      # - JELLYFIN_URL=https://jellyfin.example.com
+
+      # Optional: request system (can also be set in the web UI)
+      # - JELLYFIN_URL=http://jellyfin:8096
       # - JELLYFIN_API_KEY=your-jellyfin-api-key
-      # - EMBY_URL=https://emby.example.com
+      # - EMBY_URL=http://emby:8096
       # - EMBY_API_KEY=your-emby-api-key
-      # - PLEX_URL=http://192.168.1.100:32400
-      
-      # Python unbuffered for better logging
-      - PYTHONUNBUFFERED=1
-      
+      # - PLEX_URL=http://plex:32400
+
+    networks:
+      - blissful-network
     restart: unless-stopped
-    
-    # Health check
+
     healthcheck:
       test: ["CMD-SHELL", "python -c 'import requests; requests.get(\"http://localhost:7373/api/health\", timeout=5)' || exit 1"]
       interval: 30s
       timeout: 10s
       start_period: 5s
       retries: 3
-    
-    # Logging configuration
+
     logging:
       driver: "json-file"
       options:
         max-size: "10m"
         max-file: "3"
+
+  # PO-token provider sidecar. Same network as blissful, NO host port.
+  # This is what makes YouTube / YouTube Music stop returning 403s.
+  blissful-pot:
+    image: brainicism/bgutil-ytdlp-pot-provider:latest
+    container_name: blissful-pot
+    environment:
+      - TZ=America/Toronto
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - POT_PROVIDER_URL=http://blissful-pot:4416
+    networks:
+      - blissful-network
+    restart: unless-stopped
+    # Intentionally no `ports:` - only reachable from the compose network.
 
 # Optional: Add Lidarr service if not already running
 # Uncomment below if you want to run Lidarr in Docker too
@@ -66,11 +113,11 @@ services:
 #    environment:
 #      - PUID=1000
 #      - PGID=1000
-#      - TZ=America/New_York
+#      - TZ=America/Toronto
 #    volumes:
 #      - ./lidarr/config:/config
-#      - /path/to/music:/music
-#      - /path/to/downloads:/downloads
+#      - /mnt/Storage/Music:/media/Music
+#      - ./downloads:/downloads
 #    ports:
 #      - "8686:8686"
 #    restart: unless-stopped
@@ -86,11 +133,11 @@ services:
 #    environment:
 #      - PUID=1000
 #      - PGID=1000
-#      - TZ=America/New_York
+#      - TZ=America/Toronto
 #    volumes:
 #      - ./jellyfin/config:/config
 #      - ./jellyfin/cache:/cache
-#      - /path/to/music:/music:ro
+#      - /mnt/Storage/Music:/media/Music:ro
 #    ports:
 #      - "8096:8096"
 #    restart: unless-stopped
@@ -98,5 +145,5 @@ services:
 #      - blissful-network
 
 networks:
-  default:
+  blissful-network:
     name: blissful-network

@@ -4,6 +4,57 @@ Common issues and their solutions for Blissful.
 
 ---
 
+## 🔑 YouTube / YouTube Music 403s (most common)
+
+If downloads fail with **HTTP 403** on YouTube or YouTube Music, the yt-dlp
+runtime is missing one of two pieces:
+
+1. **Deno 2.x** — JavaScript runtime for YouTube's JS challenges.
+2. **PO-token provider** — the `blissful-pot` sidecar
+   (`brainicism/bgutil-ytdlp-pot-provider`) on the **same Docker network** as
+   Blissful, reachable at `http://blissful-pot:4416` with **no host port**.
+
+**Quick diagnosis:**
+
+```bash
+curl -s http://localhost:7373/api/health
+# js_runtime_available: true
+# pot_provider_reachable: true
+```
+
+These fields are added by the runtime update. Interpret them like this:
+
+| Field | `false` means | Fix |
+|-------|---------------|-----|
+| `js_runtime_available` | Deno is missing or at the wrong path | Rebuild from the repo, or run `scripts/setup-ytdlp-runtime.sh` on the published image |
+| `pot_provider_reachable` | Sidecar is down or on a different network | Start `blissful-pot` and put both containers on `blissful-network` |
+
+**Fix when building from the repo (automatic):**
+
+```bash
+docker compose up -d --build
+# The Dockerfile bakes in Deno 2.x, yt-dlp>=2026.10.26 and
+# bgutil-ytdlp-pot-provider>=2.0.2; compose starts the sidecar.
+```
+
+**Fix when using the published image:**
+
+```bash
+docker cp scripts/setup-ytdlp-runtime.sh blissful:/tmp/setup-ytdlp-runtime.sh
+docker exec -u 0 blissful sh /tmp/setup-ytdlp-runtime.sh
+docker compose restart blissful
+```
+
+The script is idempotent, installs into the persistent `YT_DLP_HOME`, and
+writes `yt-dlp.conf` with `--js-runtimes deno:<local path>` and
+`--extractor-args youtubepot-bgutilhttp:base_url=$POT_PROVIDER_URL`.
+
+> ⚠️ PO tokens **reduce** 403s but do **not guarantee** they never occur.
+> YouTube changes its defenses; keep yt-dlp updated and leave fallback
+> sources (SoundCloud, Bandcamp) enabled.
+
+---
+
 ## 🚨 Common Issues
 
 ### **Application Won't Start**
@@ -426,22 +477,28 @@ Task Manager (Ctrl+Shift+Esc)
 ### **Health Check**
 
 ```bash
-# Check all systems:
-curl http://localhost:5000/api/health
+# Check all systems (port 7373, not 5000):
+curl http://localhost:7373/api/health
 
-# Should return:
+# Should return (with the runtime update):
 {
   "status": "healthy",
   "ffmpeg_available": true,
-  "ytdlp_available": true
+  "ytdlp_available": true,
+  "js_runtime_available": true,
+  "pot_provider_reachable": true
 }
 ```
+
+`js_runtime_available` verifies the Deno JS runtime; `pot_provider_reachable`
+verifies that the `blissful-pot` sidecar is reachable over the shared Docker
+network. See the 403 section at the top of this guide if either is `false`.
 
 ### **System Info**
 
 ```bash
 # Get system information:
-curl http://localhost:5000/api/system/info
+curl http://localhost:7373/api/system/info
 
 # Returns:
 {
@@ -455,7 +512,7 @@ curl http://localhost:5000/api/system/info
 
 ```bash
 # Test download functionality:
-curl -X POST http://localhost:5000/api/download-track \
+curl -X POST http://localhost:7373/api/download-track \
   -H "Content-Type: application/json" \
   -d '{
     "artist": "Test Artist",
@@ -472,6 +529,9 @@ Before asking for help, verify:
 - [ ] Python 3.8+ installed
 - [ ] All dependencies installed (`pip install -r requirements.txt`)
 - [ ] FFmpeg installed and in PATH
+- [ ] yt-dlp >= 2026.10.26 and bgutil-ytdlp-pot-provider >= 2.0.2 installed
+- [ ] Deno 2.x available (`js_runtime_available: true`)
+- [ ] `blissful-pot` running on the same Docker network (`pot_provider_reachable: true`)
 - [ ] Lidarr running and accessible
 - [ ] Lidarr API key correct
 - [ ] yt-dlp updated (`pip install --upgrade yt-dlp`)
@@ -482,20 +542,26 @@ Before asking for help, verify:
 
 ---
 
-## 🐛 Debug Mode
+## 🐛 Debug Mode (keep it OFF)
 
-Enable detailed logging:
+Blissful runs with **debug disabled** in normal and production use:
 
 ```python
 # In Blissful.py:
-app.run(host='0.0.0.0', port=7373, debug=True)
-
-# Or set environment variable:
-export FLASK_DEBUG=1
-python run.py
+app.run(host='0.0.0.0', port=7373, debug=False)
 ```
 
-**Warning:** Only use debug mode for troubleshooting! Don't use in production.
+or via environment:
+
+```bash
+export BLISSFUL_DEBUG=false
+export FLASK_DEBUG=0
+```
+
+**Warning:** The interactive debugger is unsafe in production. If you temporarily
+enable it for local troubleshooting, turn it back off immediately and never expose
+the service to the internet with it on. For routine issues use the log files and
+`/api/health` instead.
 
 ---
 
@@ -695,9 +761,9 @@ New-ItemProperty -Path "HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem" `
 
 If none of the above helped:
 
-1. **Enable debug mode**
-2. **Reproduce the issue**
-3. **Collect logs**
+1. **Check `/api/health`** for `js_runtime_available` and `pot_provider_reachable`
+2. **Collect logs** (`docker compose logs blissful blissful-pot`)
+3. **Reproduce the issue** with debug still OFF
 4. **Open a GitHub issue** with:
    - Error message
    - Steps to reproduce

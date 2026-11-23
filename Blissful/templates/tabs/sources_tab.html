@@ -16,4 +16,27 @@
             </div>
         </div>
     </div>
+
+    <div class="card">
+        <h2>🎧 Metadata Providers</h2>
+        <p class="help-text">
+            Metadata providers do not serve audio. They refine search metadata before
+            Blissful asks YouTube, YouTube Music, SoundCloud or Bandcamp for the track.
+        </p>
+        <div class="form-group">
+            <label>
+                <input type="checkbox" id="spotifyMetadataEnabled">
+                Use Spotify as a metadata source
+            </label>
+            <p class="help-text">Requires your own Spotify developer client ID and secret.</p>
+        </div>
+        <div class="form-group">
+            <label for="spotifyClientId">Spotify Client ID</label>
+            <input type="text" id="spotifyClientId" placeholder="From Spotify Developer Dashboard">
+        </div>
+        <div class="form-group">
+            <label for="spotifyClientSecret">Spotify Client Secret</label>
+            <input type="password" id="spotifyClientSecret" placeholder="Leave blank to keep saved secret">
+        </div>
+    </div>
 </div>

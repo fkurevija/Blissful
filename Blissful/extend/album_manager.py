@@ -16,7 +16,31 @@ class AlbumManager:
         self.LidarrClient = lidarr_client_class
         self.download_manager = download_manager
         self.audio_converter = audio_converter
-    
+
+    @staticmethod
+    def _is_enabled(config, key, default=True):
+        """Feature flags default to on; only an explicit False disables them."""
+        return config.get(key, default) is not False
+
+    @staticmethod
+    def _duration_seconds(value):
+        """Convert a Lidarr track duration (milliseconds) into seconds."""
+        if value is None or value == '':
+            return None
+        try:
+            seconds = float(value) / 1000.0
+        except (TypeError, ValueError):
+            return None
+        return seconds if seconds > 0 else None
+
+    @staticmethod
+    def _first_value(data, *keys):
+        for key in keys:
+            value = data.get(key)
+            if value not in (None, ''):
+                return value
+        return None
+
     def get_album_info(self, album_id):
         """
         Fetch album information from Lidarr API
@@ -102,10 +126,20 @@ class AlbumManager:
             # Fetch tracks
             tracks = lidarr_client.get_album_tracks(int(album_id))
             
-            if not tracks:
+            # BLISS-9: an empty list is a valid (successful) result, e.g. an
+            # album whose tracks are all unmonitored. Only a non-list response
+            # is a genuine failure; exceptions are handled below.
+            if tracks is None or not isinstance(tracks, list):
                 return {
                     'success': False,
                     'error': f'No tracks found for album {album_id}'
+                }
+            if not tracks:
+                logger.info(f"Album {album_id} has no tracks")
+                return {
+                    'success': True,
+                    'tracks': [],
+                    'total': 0
                 }
             
             # Format track data
@@ -171,14 +205,26 @@ class AlbumManager:
                 }
                 
                 try:
+                    # Lidarr reports track durations in milliseconds; the
+                    # download manager expects seconds for its duration hint.
+                    expected_duration = self._duration_seconds(track.get('duration'))
+
                     # Download track
-                    download_result = self.download_manager.download_track(
-                        artist=artist,
-                        title=track.get('title'),
-                        album=album,
-                        output_format=config.get('output_format', 'mp3'),
-                        source_priorities=config.get('source_priorities', [])
-                    )
+                    download_kwargs = {
+                        'artist': artist,
+                        'title': track.get('title'),
+                        'album': album,
+                        'output_format': config.get('output_format', 'mp3'),
+                        'source_priorities': config.get('source_priorities', []),
+                        'expected_duration': expected_duration,
+                    }
+                    try:
+                        download_result = self.download_manager.download_track(**download_kwargs)
+                    except TypeError as exc:
+                        if 'expected_duration' not in str(exc):
+                            raise
+                        download_kwargs.pop('expected_duration')
+                        download_result = self.download_manager.download_track(**download_kwargs)
                     
                     if download_result['success']:
                         # Convert track
@@ -187,6 +233,24 @@ class AlbumManager:
                             output_format=config.get('output_format', 'mp3'),
                             quality=config.get('quality', '320k')
                         )
+
+                        # Tag before moving the file into the library.
+                        if self._is_enabled(config, 'embed_metadata'):
+                            thumbnail = None
+                            if self._is_enabled(config, 'embed_thumbnail'):
+                                thumbnail = download_result.get('thumbnail_path')
+                            self.audio_converter.add_metadata(
+                                converted_file,
+                                artist=artist,
+                                album_artist=artist,
+                                title=track.get('title'),
+                                album=album,
+                                year=self._first_value(track, 'year', 'releaseYear', 'release_year'),
+                                track_number=track.get('trackNumber'),
+                                disc=self._first_value(track, 'mediumNumber', 'discNumber', 'disc_number'),
+                                genre=track.get('genre'),
+                                thumbnail_path=thumbnail,
+                            )
                         
                         # Move to target if specified
                         if target_path and config.get('lidarr_path_mapping'):

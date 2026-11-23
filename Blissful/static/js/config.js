@@ -112,6 +112,31 @@ async function loadConfiguration() {
         document.getElementById('embedMetadata').checked = config.embed_metadata !== false;
         document.getElementById('embedThumbnail').checked = config.embed_thumbnail !== false;
         
+        // Metadata providers (do not serve audio)
+        document.getElementById('spotifyMetadataEnabled').checked = config.spotify_metadata_enabled || false;
+        document.getElementById('spotifyClientId').value = config.spotify_client_id || '';
+        const spotifySecretField = document.getElementById('spotifyClientSecret');
+        if (config.spotify_client_secret === '***MASKED***') {
+            spotifySecretField.value = '';
+            spotifySecretField.dataset.hasSavedKey = 'true';
+            spotifySecretField.placeholder = 'Secret configured (leave blank to keep)';
+        } else {
+            spotifySecretField.value = config.spotify_client_secret || '';
+            spotifySecretField.dataset.hasSavedKey = 'false';
+            spotifySecretField.placeholder = 'Leave blank to keep saved secret';
+        }
+        
+        // Optional API token
+        const tokenField = document.getElementById('authToken');
+        if (config.auth_token === '***MASKED***') {
+            tokenField.value = '';
+            tokenField.dataset.hasSavedKey = 'true';
+            tokenField.placeholder = 'Token configured (leave blank to keep)';
+        } else {
+            tokenField.value = config.auth_token || '';
+            tokenField.dataset.hasSavedKey = 'false';
+        }
+        
         // Load path mappings
         const pathMappings = config.lidarr_path_mapping || {};
         Object.entries(pathMappings).forEach(([microPath, lidarrPath]) => {
@@ -170,6 +195,12 @@ async function saveConfiguration() {
             embed_metadata: document.getElementById('embedMetadata').checked,
             embed_thumbnail: document.getElementById('embedThumbnail').checked,
             
+            // Metadata providers
+            spotify_metadata_enabled: document.getElementById('spotifyMetadataEnabled').checked,
+            spotify_client_id: document.getElementById('spotifyClientId').value.trim(),
+            spotify_client_secret: document.getElementById('spotifyClientSecret').value.trim(),
+            auth_token: document.getElementById('authToken').value.trim(),
+            
             lidarr_path_mapping: getPathMappings(),
             source_priorities: getSourcePriorities(),
             
@@ -188,9 +219,18 @@ async function saveConfiguration() {
             request_search_missing: document.getElementById('requestSearchMissing').value === 'true'
         };
         
-        // Special marker: if field is empty but we have a saved key, send special marker
+        // Special marker: if a secret field is empty but a saved value exists,
+        // ask the server to keep it instead of clearing it.
         if (!apiKeyValue && apiKeyField.dataset.hasSavedKey === 'true') {
             config.lidarr_api_key = '***KEEP_EXISTING***';
+        }
+        const spotifySecret = document.getElementById('spotifyClientSecret');
+        if (!config.spotify_client_secret && spotifySecret.dataset.hasSavedKey === 'true') {
+            config.spotify_client_secret = '***KEEP_EXISTING***';
+        }
+        const tokenField = document.getElementById('authToken');
+        if (!config.auth_token && tokenField.dataset.hasSavedKey === 'true') {
+            config.auth_token = '***KEEP_EXISTING***';
         }
         
         console.log('Saving configuration:', { 
@@ -238,32 +278,9 @@ async function testLidarrConnection() {
     let url = urlField.value.trim();
     let apiKey = apiKeyField.value.trim();
     
-    // If API key field is empty but we have a saved key, fetch it from backend
+    // The server resolves the saved key from its own config; never fetch it.
     if (!apiKey && apiKeyField.dataset.hasSavedKey === 'true') {
-        resultDiv.className = 'message info';
-        resultDiv.textContent = 'Loading saved API key...';
-        
-        try {
-            // Get the actual API key from backend for testing
-            const response = await fetch('/api/get-api-key', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ lidarr_url: url })
-            });
-            
-            const data = await response.json();
-            if (data.success && data.api_key) {
-                apiKey = data.api_key;
-            } else {
-                resultDiv.className = 'message error';
-                resultDiv.textContent = '❌ Could not retrieve saved API key';
-                return;
-            }
-        } catch (error) {
-            resultDiv.className = 'message error';
-            resultDiv.textContent = '❌ Error retrieving API key';
-            return;
-        }
+        apiKey = '***KEEP_EXISTING***';
     }
     
     if (!url || !apiKey) {

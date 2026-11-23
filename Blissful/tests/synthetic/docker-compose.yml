@@ -1,0 +1,41 @@
+# Synthetic stack: no real YouTube, no real Lidarr. Used to exercise the API,
+# auth gating, health fields and job queue deterministically.
+services:
+  mock-lidarr:
+    image: python:3.11-slim
+    container_name: blissful-mock-lidarr
+    command: python /srv/mock_lidarr.py
+    volumes:
+      - ./mock_lidarr.py:/srv/mock_lidarr.py:ro
+    networks: [blissful-synthetic]
+
+  blissful:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    container_name: blissful-synthetic
+    ports:
+      - "7374:7373"
+    environment:
+      PUID: "1000"
+      PGID: "1000"
+      TZ: America/Toronto
+      ENABLE_POT_PROVIDER: "false"
+      BLISSFUL_AUTH_TOKEN: synthetic-token
+      LIDARR_URL: http://mock-lidarr:8686
+      LIDARR_API_KEY: synthetic-key
+    depends_on:
+      - mock-lidarr
+    tmpfs:
+      - /app/config
+      - /app/downloads
+    networks: [blissful-synthetic]
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import requests; requests.get('http://localhost:7373/api/health', timeout=5)\" || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+networks:
+  blissful-synthetic:
+    name: blissful-synthetic

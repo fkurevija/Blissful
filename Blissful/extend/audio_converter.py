@@ -184,68 +184,172 @@ class AudioConverter:
         title: Optional[str] = None,
         album: Optional[str] = None,
         year: Optional[str] = None,
-        track_number: Optional[str] = None
+        track_number: Optional[str] = None,
+        album_artist: Optional[str] = None,
+        disc: Optional[str] = None,
+        genre: Optional[str] = None,
+        thumbnail_path: Optional[str] = None
     ) -> bool:
         """
-        Add metadata to audio file
-        
+        Add metadata to an audio file using a stream copy.
+
+        ``-map 0`` keeps every input stream (including existing cover art).
+        A local image passed as ``thumbnail_path`` is attached as an
+        ``attached_pic`` stream.  If the muxer rejects the attachment the tag
+        write is retried without it so metadata is still applied.
+
         Args:
             file_path: Path to audio file
             artist: Artist name
             title: Track title
             album: Album name
-            year: Release year
-            track_number: Track number
-            
+            year: Release year (written as the ``date`` tag)
+            track_number: Track number (written as the ``track`` tag)
+            album_artist: Album artist name
+            disc: Disc number
+            genre: Genre
+            thumbnail_path: Optional local image to embed as cover art
+
         Returns:
             True if successful
         """
         try:
             input_path = Path(file_path)
+            if not input_path.is_file():
+                logger.warning(f"Cannot add metadata, file not found: {file_path}")
+                return False
             temp_path = input_path.with_suffix('.temp' + input_path.suffix)
-            
+
+            tags = (
+                ('artist', artist),
+                ('album_artist', album_artist),
+                ('title', title),
+                ('album', album),
+                ('disc', disc),
+                ('track', track_number),
+                ('date', year),
+                ('genre', genre),
+            )
+            metadata_args = []
+            for name, value in tags:
+                if value is not None and str(value) != '':
+                    metadata_args.extend(['-metadata', f'{name}={value}'])
+
             cmd = [
                 'ffmpeg',
                 '-i', str(input_path),
                 '-y',
+                '-map', '0',      # preserve all streams, including existing artwork
                 '-codec', 'copy'
-            ]
-            
-            # Add metadata
-            if artist:
-                cmd.extend(['-metadata', f'artist={artist}'])
-            if title:
-                cmd.extend(['-metadata', f'title={title}'])
-            if album:
-                cmd.extend(['-metadata', f'album={album}'])
-            if year:
-                cmd.extend(['-metadata', f'date={year}'])
-            if track_number:
-                cmd.extend(['-metadata', f'track={track_number}'])
-            
-            cmd.append(str(temp_path))
-            
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                timeout=60
-            )
-            
-            if result.returncode == 0:
-                # Replace original file with temp file
+            ] + metadata_args
+
+            # Optional embedded cover art, guarded so a bad image never
+            # prevents the rest of the tags from being written.
+            thumb = None
+            if thumbnail_path:
+                candidate = Path(str(thumbnail_path))
+                if candidate.is_file():
+                    thumb = candidate
+                else:
+                    logger.debug(f"Thumbnail not found locally, skipping: {thumbnail_path}")
+
+            def run(command):
+                return subprocess.run(command, capture_output=True, text=True, timeout=60)
+
+            cover_name = 'cover' + (thumb.suffix.lower() or '.jpg') if thumb is not None else ''
+            attempts = []
+            if thumb is not None:
+                # Preferred: ffmpeg attachment with the attached_pic disposition.
+                attach_cmd = list(cmd)
+                attach_cmd.extend([
+                    '-attach', str(thumb),
+                    '-metadata:s:t:0', f'filename={cover_name}',
+                    '-disposition:t:0', 'attached_pic',
+                ])
+                attempts.append(attach_cmd)
+
+                # Some muxers (notably MP3) reject data attachments but accept
+                # the same image as an attached picture video stream.
+                pic_cmd = [
+                    'ffmpeg', '-i', str(input_path), '-i', str(thumb), '-y',
+                    '-map', '0', '-map', '1', '-codec', 'copy'
+                ] + metadata_args + [
+                    '-disposition:v:0', 'attached_pic',
+                    '-metadata:s:v:0', f'filename={cover_name}',
+                ]
+                attempts.append(pic_cmd)
+            attempts.append(cmd)
+
+            result = None
+            for attempt in attempts:
+                try:
+                    candidate = run(attempt + [str(temp_path)])
+                except Exception as exc:
+                    logger.warning(f"FFmpeg tag write attempt failed: {exc}")
+                    continue
+                if candidate.returncode == 0:
+                    result = candidate
+                    break
+                logger.warning(
+                    "FFmpeg tag write attempt failed, trying fallback: %s",
+                    str(getattr(candidate, 'stderr', '') or '').strip()[-200:]
+                )
+                if temp_path.exists():
+                    temp_path.unlink()
+
+            if result is None:
+                logger.error("All metadata write attempts failed")
+                return False
+
+            if result.returncode == 0 and temp_path.exists():
                 temp_path.replace(input_path)
                 logger.info(f"Added metadata to {file_path}")
                 return True
-            else:
-                logger.error(f"Failed to add metadata: {result.stderr}")
-                if temp_path.exists():
-                    temp_path.unlink()
-                return False
-                
-        except Exception as e:
-            logger.error(f"Error adding metadata: {e}")
+
+            logger.error(f"Failed to add metadata: {str(getattr(result, 'stderr', '') or '').strip()}")
+            if temp_path.exists():
+                temp_path.unlink()
             return False
+
+        except Exception as e:
+            logger.error(f"Error adding metadata: {e}", exc_info=True)
+            return False
+
+    def get_duration(self, file_path: str) -> float:
+        """
+        Get the duration of a media file in seconds.
+
+        Uses the ffprobe ``format.duration`` value and falls back to the
+        longest stream duration when the format duration is unavailable.
+
+        Args:
+            file_path: Path to the media file
+
+        Returns:
+            Duration in seconds, or 0.0 if it cannot be determined
+        """
+        try:
+            data = self.extract_metadata(file_path) or {}
+            duration = data.get('format', {}).get('duration')
+            if duration is not None:
+                return float(duration)
+
+            durations = []
+            for stream in data.get('streams', []) or []:
+                stream_duration = stream.get('duration')
+                if stream_duration is None:
+                    continue
+                try:
+                    durations.append(float(stream_duration))
+                except (TypeError, ValueError):
+                    continue
+            return max(durations) if durations else 0.0
+        except (TypeError, ValueError) as e:
+            logger.warning(f"Could not parse duration for {file_path}: {e}")
+            return 0.0
+        except Exception as e:
+            logger.error(f"Error getting duration for {file_path}: {e}")
+            return 0.0
     
     def normalize_audio(self, file_path: str, target_level: str = '-14.0') -> bool:
         """

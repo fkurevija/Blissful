@@ -53,22 +53,9 @@ async function autoPopulatePathMapping() {
     let lidarrUrl = lidarrUrlField.value.trim();
     let lidarrApiKey = apiKeyField.value.trim();
     
-    // If API key field is empty but we have a saved key, fetch it
+    // The server resolves a saved key from its own config; never fetch it.
     if (!lidarrApiKey && apiKeyField.dataset.hasSavedKey === 'true') {
-        try {
-            const response = await fetch('/api/get-api-key', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ lidarr_url: lidarrUrl })
-            });
-            const data = await response.json();
-            if (data.success && data.api_key) {
-                lidarrApiKey = data.api_key;
-            }
-        } catch (error) {
-            showNotification('Error retrieving API key', 'error');
-            return;
-        }
+        lidarrApiKey = '***KEEP_EXISTING***';
     }
     
     if (!lidarrUrl || !lidarrApiKey) {

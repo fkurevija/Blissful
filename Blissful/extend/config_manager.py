@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 from pathlib import Path
 from typing import Dict, Any
 
@@ -26,19 +27,50 @@ class ConfigManager:
             Configuration dictionary
         """
         try:
+            defaults = self._get_default_config()
             if self.config_file.exists():
                 with open(self.config_file, 'r') as f:
                     config = json.load(f)
-                    logger.info("Configuration loaded successfully")
-                    return config
+                logger.info("Configuration loaded successfully")
+                # Merge defaults so upgrades always see newly introduced keys.
+                merged = defaults.copy()
+                merged.update(config if isinstance(config, dict) else {})
+                return self._apply_env_overrides(merged)
             else:
                 # Return default configuration
                 logger.info("No config file found, using defaults")
-                return self._get_default_config()
+                return self._apply_env_overrides(defaults)
         except Exception as e:
             logger.error(f"Error loading configuration: {e}")
-            return self._get_default_config()
-    
+            return self._apply_env_overrides(self._get_default_config())
+
+    def _apply_env_overrides(self, config: Dict[str, Any]) -> Dict[str, Any]:
+        """Apply deployment secrets/settings supplied through environment variables.
+
+        Environment values win over config.json so secrets never need to be written
+        to disk. Only known keys are read.
+        """
+        env_map = {
+            'BLISSFUL_AUTH_TOKEN': 'auth_token',
+            'LIDARR_URL': 'lidarr_url',
+            'LIDARR_API_KEY': 'lidarr_api_key',
+            'SPOTIFY_CLIENT_ID': 'spotify_client_id',
+            'SPOTIFY_CLIENT_SECRET': 'spotify_client_secret',
+            'POT_PROVIDER_URL': 'pot_provider_url',
+            'DENO_PATH': 'deno_path',
+            'YT_DLP_CONFIG_FILE': 'ytdlp_config_file',
+        }
+        bool_keys = {'enable_pot_provider', 'spotify_metadata_enabled'}
+        for env_key, config_key in env_map.items():
+            value = os.environ.get(env_key)
+            if value is None or value == '':
+                continue
+            if config_key in bool_keys:
+                config[config_key] = value.strip().lower() in ('1', 'true', 'yes', 'on')
+            else:
+                config[config_key] = value
+        return config
+
     def _get_default_config(self) -> Dict[str, Any]:
         """
         Get default configuration
@@ -66,9 +98,29 @@ class ConfigManager:
                 {'name': 'YouTube Music', 'search': 'music.youtube.com', 'enabled': True},
                 {'name': 'SoundCloud', 'search': 'soundcloud.com', 'enabled': True},
                 {'name': 'YouTube', 'search': 'youtube.com', 'enabled': True},
-                {'name': 'Bandcamp', 'search': 'bandcamp.com', 'enabled': True},
-                {'name': 'Spotify', 'search': 'spotify.com', 'enabled': True}
+                {'name': 'Bandcamp', 'search': 'bandcamp.com', 'enabled': True}
             ],
+            # Metadata providers do not serve audio; they only refine search metadata.
+            'spotify_metadata_enabled': False,
+            'spotify_client_id': '',
+            'spotify_client_secret': '',
+            # Optional API token. Off by default; enable when exposing Blissful
+            # beyond a trusted LAN/VPN. BLISSFUL_AUTH_TOKEN env wins.
+            'auth_token': '',
+            # yt-dlp runtime / PO token provider (Deno + bgutil sidecar).
+            'enable_pot_provider': True,
+            'pot_provider_url': 'http://blissful-pot:4416',
+            'deno_path': '/usr/local/bin/deno',
+            'ytdlp_config_file': '',
+            'ytdlp_extractor_args': {},
+            'ytdlp_js_runtimes': {},
+            # Download trust settings.
+            'validate_duration': True,
+            'max_duration_deviation': 0.10,
+            'use_lidarr_naming': True,
+            'enable_jobs': True,
+            'auto_retry_failed': False,
+            'job_retention_days': 7,
             # Request system defaults
             'enable_requests': False,
             'auto_monitor_requests': False,
@@ -233,6 +285,40 @@ class ConfigManager:
         
         if 'request_search_missing' in config:
             validated['request_search_missing'] = bool(config['request_search_missing'])
+        
+        # Metadata provider, API token and yt-dlp runtime settings.
+        for key in ('spotify_metadata_enabled', 'enable_pot_provider',
+                    'validate_duration', 'use_lidarr_naming', 'enable_jobs',
+                    'auto_retry_failed'):
+            if key in config:
+                validated[key] = bool(config[key])
+        for key in ('spotify_client_id', 'spotify_client_secret', 'auth_token'):
+            if key in config:
+                value = config[key]
+                if value in ('***KEEP_EXISTING***', '***MASKED***'):
+                    continue
+                validated[key] = str(value)
+        for key in ('pot_provider_url', 'deno_path', 'ytdlp_config_file'):
+            if key in config:
+                validated[key] = str(config[key])
+        if 'ytdlp_extractor_args' in config and isinstance(config['ytdlp_extractor_args'], dict):
+            validated['ytdlp_extractor_args'] = config['ytdlp_extractor_args']
+        if 'ytdlp_js_runtimes' in config and isinstance(config['ytdlp_js_runtimes'], dict):
+            validated['ytdlp_js_runtimes'] = config['ytdlp_js_runtimes']
+        if 'max_duration_deviation' in config:
+            try:
+                deviation = float(config['max_duration_deviation'])
+                if 0 <= deviation <= 1:
+                    validated['max_duration_deviation'] = deviation
+            except (ValueError, TypeError):
+                pass
+        if 'job_retention_days' in config:
+            try:
+                days = int(config['job_retention_days'])
+                if days >= 0:
+                    validated['job_retention_days'] = days
+            except (ValueError, TypeError):
+                pass
         
         return validated
     

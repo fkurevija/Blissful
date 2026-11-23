@@ -176,6 +176,32 @@ class LidarrClient:
             logger.error(f"Error getting album tracks: {e}")
             return []
     
+    def get_naming_config(self) -> Optional[Dict]:
+        """
+        Get Lidarr's naming configuration.
+
+        Returns:
+            Naming configuration dict (e.g. standardTrackFormat /
+            multiDiscTrackFormat), or None if unavailable. The API key is
+            never included in log messages.
+        """
+        try:
+            response = requests.get(
+                f"{self.url}/api/v1/config/naming",
+                headers=self.headers,
+                timeout=10
+            )
+
+            if response.status_code == 200:
+                data = response.json()
+                return data if isinstance(data, dict) else None
+            logger.error(f"Failed to get naming config: {response.status_code}")
+            return None
+        except Exception as e:
+            # Do not log the request/headers: they contain the API key.
+            logger.error(f"Error getting naming config: {e}")
+            return None
+
     def get_missing_tracks(self, artist_id: Optional[int] = None) -> List[Dict]:
         """
         Get missing tracks, optionally filtered by artist

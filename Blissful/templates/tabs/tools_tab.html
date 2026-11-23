@@ -179,6 +179,21 @@ RUN apt-get update && apt-get install -y ffmpeg</code>
     </div>
 </div>
 
+    <!-- Security Section -->
+    <div class="card">
+        <h2>🔒 API Security</h2>
+        <p class="info-text">
+            API token protection is optional and off by default. Enable it before exposing
+            Blissful beyond a trusted LAN/VPN. The generated userscript picks up the token
+            automatically; reinstall the userscript after changing it.
+        </p>
+        <div class="form-group">
+            <label for="authToken">API token (blank = disabled)</label>
+            <input type="password" id="authToken" placeholder="Leave blank to disable token protection">
+            <p class="help-text">Can also be supplied with the BLISSFUL_AUTH_TOKEN environment variable.</p>
+        </div>
+    </div>
+
 <style>
 .version-info {
     background: var(--bg-secondary);

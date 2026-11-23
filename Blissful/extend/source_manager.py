@@ -1,6 +1,9 @@
 """
 YT-DLP Source Manager
 Dynamically retrieves and manages all supported extractors from yt-dlp
+
+Spotify is treated as a metadata provider only; it is not advertised as a
+download source anywhere in this module.
 """
 
 import logging
@@ -16,10 +19,10 @@ class SourceManager:
         """Initialize the source manager"""
         self._extractors_cache = None
         self._categories = {
-            'music': ['youtube', 'soundcloud', 'bandcamp', 'spotify', 'deezer', 'tidal', 
-                     'applemusic', 'mixcloud', 'audiomack', 'jamendo', 'reverbnation'],
+            'music': ['youtube', 'soundcloud', 'bandcamp', 'deezer', 'tidal',
+                      'applemusic', 'mixcloud', 'audiomack', 'jamendo', 'reverbnation'],
             'video': ['youtube', 'vimeo', 'dailymotion', 'tiktok', 'twitch'],
-            'podcast': ['spotify', 'soundcloud', 'mixcloud', 'youtube'],
+            'podcast': ['soundcloud', 'mixcloud', 'youtube'],
             'archive': ['archive', 'internetarchive'],
             'free': ['jamendo', 'freemusicarchive', 'ccmixter', 'archive']
         }
@@ -152,12 +155,11 @@ class SourceManager:
         """
         extractor_name = extractor_name.lower()
         
-        # Known search prefixes
+        # Known search prefixes (Spotify removed: metadata only, not downloadable)
         search_prefixes = {
             'youtube': 'ytsearch',
             'youtubemusic': 'ytsearch',
             'soundcloud': 'scsearch',
-            'spotify': 'spsearch',
             'deezer': 'dzsearch',
         }
         
@@ -170,8 +172,8 @@ class SourceManager:
     def _is_music_source(self, ie_key: str) -> bool:
         """Determine if extractor is music-focused"""
         music_keywords = [
-            'music', 'sound', 'audio', 'song', 'track', 'album', 
-            'spotify', 'deezer', 'tidal', 'bandcamp', 'jamendo',
+            'music', 'sound', 'audio', 'song', 'track', 'album',
+            'deezer', 'tidal', 'bandcamp', 'jamendo',
             'mixcloud', 'audiomack', 'reverbnation'
         ]
         
@@ -194,7 +196,7 @@ class SourceManager:
         Tier 4: Niche or experimental
         """
         tier1_sources = [
-            'youtube', 'soundcloud', 'bandcamp', 'spotify', 'vimeo'
+            'youtube', 'soundcloud', 'bandcamp', 'vimeo'
         ]
         
         tier2_sources = [
@@ -228,8 +230,6 @@ class SourceManager:
             return 'SoundCloud'
         elif name.lower() == 'bandcamp':
             return 'Bandcamp'
-        elif name.lower() == 'spotify':
-            return 'Spotify'
         elif 'youtube' in name.lower() and 'music' in name.lower():
             return 'YouTube Music'
         else:
@@ -283,16 +283,6 @@ class SourceManager:
                 'tier': 1,
                 'search_supported': False,
                 'enabled': True
-            },
-            {
-                'name': 'Spotify',
-                'ie_key': 'spotify',
-                'description': 'Music streaming service',
-                'is_music': True,
-                'category': 'music',
-                'tier': 1,
-                'search_supported': True,
-                'enabled': True
             }
         ]
     
@@ -335,9 +325,9 @@ class SourceManager:
         Returns:
             True if search is supported
         """
-        # Known extractors with search support
+        # Known extractors with search support (Spotify removed: metadata only)
         search_supported = [
-            'youtube', 'soundcloud', 'spotify', 'deezer', 'tidal',
+            'youtube', 'soundcloud', 'deezer', 'tidal',
             'dailymotion', 'vimeo', 'bilibili', 'niconico',
             'mixcloud', 'bandcamp', 'applemusic', 'tiktok',
             'googlevideo', 'yandex', 'rutube'

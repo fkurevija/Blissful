@@ -225,9 +225,9 @@ Control which sources are tried first:
 
 | Category | Examples | Quality | Speed |
 |----------|----------|---------|-------|
-| **Music Services** | Spotify, Deezer, SoundCloud | Excellent | Fast |
+| **Music Services** | Deezer, SoundCloud | Excellent | Fast |
 | **Video Platforms** | YouTube, Vimeo | Good | Fast |
-| **Podcasts** | Apple Podcasts, Spotify | Good | Medium |
+| **Podcasts** | Apple Podcasts | Good | Medium |
 | **Archives** | Internet Archive | Variable | Slow |
 | **Free Music** | Jamendo, Free Music Archive | Good | Fast |
 
@@ -237,7 +237,10 @@ Control which sources are tried first:
 2. **YouTube Music** - Large library, good quality
 3. **YouTube** - Fallback, always available
 4. **Bandcamp** - High quality, artist-friendly
-5. **Spotify** - Premium quality (requires account)
+
+> **Spotify is a metadata provider, not a download source.** Spotify's API does
+> not serve audio. Enable it under Sources → Metadata Providers to refine the
+> artist/title/album used when searching downloadable sources.
 
 ### **Filtering Sources**
 
@@ -342,10 +345,46 @@ Override settings with environment variables:
 ```bash
 export BLISSFUL_PORT=7373
 export BLISSFUL_HOST=0.0.0.0
-export BLISSFUL_DEBUG=false
+export BLISSFUL_DEBUG=false        # keep debug OFF in production
 export LIDARR_URL=http://localhost:8686
 export LIDARR_API_KEY=your-key
 ```
+
+#### **Container / yt-dlp runtime variables**
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `PORT` | `7373` | Web/API port |
+| `PUID` / `PGID` | `1000` / `1000` | Runtime UID/GID; entrypoint chowns `/app/config` and `/app/downloads` then drops privileges |
+| `TZ` | — | Container timezone (compose sets `America/Toronto`) |
+| `PYTHONPATH` | `/app/downloads/pylib` | Makes the persistent yt-dlp + PO-provider install importable |
+| `YT_DLP_HOME` | `/app/downloads` | Persistent runtime dir (Deno, `pylib`, `yt-dlp.conf`) |
+| `DENO_PATH` | `/usr/local/bin/deno` | Deno location baked into the repo image; the published-image bootstrap uses `/app/downloads/deno` |
+| `POT_PROVIDER_URL` | `http://blissful-pot:4416` | In-network PO-token sidecar URL (no host port) |
+
+#### **YouTube / YouTube Music 403 configuration**
+
+`yt-dlp.conf` (mounted read-only at `/app/downloads/yt-dlp.conf` in Compose)
+carries the two options that stop 403s:
+
+```
+--js-runtimes deno:/usr/local/bin/deno
+--extractor-args youtubepot-bgutilhttp:base_url=http://blissful-pot:4416
+```
+
+Building from the repo installs Deno 2.x and both Python packages into the
+image, so **YouTube and YouTube Music 403s are fixed automatically**. The
+`blissful-pot` service must be on the **same Docker network** as Blissful —
+it has no published host port and is addressed by service name.
+
+When using the published image, run `scripts/setup-ytdlp-runtime.sh` once; it
+writes the equivalent config using your `POT_PROVIDER_URL` and the local Deno
+path. All values are overridable: edit the host `yt-dlp.conf`, pass
+`--config-location`, or set the environment variables above.
+
+Verify with `curl -s http://localhost:7373/api/health` — the runtime update
+adds `js_runtime_available` and `pot_provider_reachable` booleans. PO tokens
+**reduce** but do **not guarantee** avoiding 403s; keep fallback sources on.
 
 ### **config.json**
 
@@ -377,16 +416,32 @@ Manual configuration file:
 ### **Docker Environment**
 
 ```yaml
-# docker-compose.yml
-environment:
-  - LIDARR_URL=http://lidarr:8686
-  - LIDARR_API_KEY=${LIDARR_API_KEY}
-  - JELLYFIN_URL=http://jellyfin:8096
-  - JELLYFIN_API_KEY=${JELLYFIN_API_KEY}
-volumes:
-  - ./config:/app/config
-  - ./downloads:/app/downloads
-  - /path/to/music:/music
+# docker-compose.yml (excerpt)
+services:
+  blissful:
+    build: .
+    depends_on:
+      - blissful-pot
+    environment:
+      - TZ=America/Toronto
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
+      - PYTHONPATH=/app/downloads/pylib
+      - YT_DLP_HOME=/app/downloads
+      - POT_PROVIDER_URL=http://blissful-pot:4416
+      - LIDARR_URL=http://lidarr:8686
+    volumes:
+      - ./config.json:/app/config.json
+      - ./downloads:/app/downloads
+      - ./yt-dlp.conf:/app/downloads/yt-dlp.conf:ro
+      - /mnt/Storage/Music:/media/Music
+    networks:
+      - blissful-network
+
+  blissful-pot:  # no host port; fixes YouTube + YouTube Music 403s
+    image: brainicism/bgutil-ytdlp-pot-provider:latest
+    networks:
+      - blissful-network
 ```
 
 ---
@@ -498,3 +553,34 @@ Before going live:
 ---
 
 **Next:** [Request System Guide](#!/documentation?doc=request-system)
+
+
+---
+
+## API security (BLISS-8)
+
+Blissful has an **optional API token**, off by default. Set `auth_token` under
+**Tools → API Security**, or supply `BLISSFUL_AUTH_TOKEN` in the container
+environment (the environment value wins). When enabled:
+
+- Every `/api/` route except `/api/health` requires `Authorization: Bearer <token>`
+  (or `X-Blissful-Token`) for **cross-origin** requests.
+- Requests from the bundled web UI (same origin) work without a token; a page
+  on another site cannot call Blissful's API. The login-free health check stays
+  public for Docker/uptime monitors.
+- The generated userscript carries the token, so reinstall it after changing
+  the token. Set `BLISSFUL_ALLOWED_ORIGINS` (comma-separated origins) if your
+  Lidarr URL is on a different host and the userscript needs CORS access.
+- `/api/get-api-key` has been removed; the Lidarr "test connection" and path
+  detection calls resolve saved keys server-side and never return them.
+
+The Flask debug server is also disabled (`debug=False`). If you expose Blissful
+beyond a LAN/VPN, enable the token and use a reverse proxy with HTTPS.
+
+## Download jobs (BLISS-11/13)
+
+`POST /api/download-album` now enqueues a job instead of blocking the request.
+Track `GET /api/jobs` and retry with `POST /api/jobs/<id>/retry`; Lidarr can also
+POST to `/api/lidarr/webhook`. Jobs persist in `config/jobs.json`, are deduped by
+album, and a single background worker drains them. Set `enable_jobs: false` in
+config.json to restore synchronous album downloads.

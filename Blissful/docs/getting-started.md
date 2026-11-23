@@ -15,6 +15,53 @@ Before you begin, make sure you have:
 
 ---
 
+## 🔑 Important: YouTube / YouTube Music 403s
+
+A plain yt-dlp install increasingly gets **HTTP 403** from YouTube and YouTube
+Music. Two pieces are required to avoid this:
+
+- **Deno 2.x** — the JavaScript runtime yt-dlp uses for YouTube's JS challenges.
+- **`blissful-pot`** — the `brainicism/bgutil-ytdlp-pot-provider` sidecar that
+  serves PO tokens. It runs on the **same Docker network** as Blissful and is
+  reached at `http://blissful-pot:4416`; it publishes **no host port**.
+
+**If you build from this repository, you don't have to do anything.** The
+Dockerfile installs Deno 2.x, `yt-dlp>=2026.10.26` and
+`bgutil-ytdlp-pot-provider>=2.0.2`, `yt-dlp.conf` points at
+`/usr/local/bin/deno` and the sidecar, and `docker-compose.yml` starts the
+sidecar automatically. This fixes YouTube **and** YouTube Music 403s out of
+the box.
+
+**If you use the published image** (`angablade/blissful:latest`), bootstrap
+once after the container has started:
+
+```bash
+docker cp scripts/setup-ytdlp-runtime.sh blissful:/tmp/setup-ytdlp-runtime.sh
+docker exec -u 0 blissful sh /tmp/setup-ytdlp-runtime.sh
+```
+
+It installs Deno into `/app/downloads/deno`, the Python packages into
+`/app/downloads/pylib`, and writes `/app/downloads/yt-dlp.conf` pointing at
+those paths and the `POT_PROVIDER_URL` (default
+`http://blissful-pot:4416`). It is idempotent and safe to re-run.
+
+**Verify the runtime:**
+
+```bash
+curl -s http://localhost:7373/api/health
+# js_runtime_available: true
+# pot_provider_reachable: true
+```
+
+These fields are added by the runtime update. If either is `false`, check that
+both containers share the `blissful-network` and that `yt-dlp.conf` is mounted
+read-only at `/app/downloads/yt-dlp.conf`.
+
+> ⚠️ PO tokens **reduce** 403s but do **not guarantee** they never occur.
+> Keep yt-dlp updated and leave fallback sources enabled.
+
+---
+
 ## 🔧 Installation
 
 ### **Method 1: Standard Installation**
@@ -38,39 +85,33 @@ python run.py
 
 ### **Method 2: Docker Installation (Recommended)**
 
-**Official Docker Image:** `angablade/blissful:latest`
+**Default: build from the repository (self-contained, fixes 403s automatically):**
 
 ```bash
-# Quick start with official image
-docker run -d \
-  --name blissful \
-  -p 7373:7373 \
-  -v $(pwd)/config.json:/app/config.json \
-  -v $(pwd)/downloads:/app/downloads \
-  angablade/blissful:latest
+git clone https://github.com/angablade/blissful.git
+cd blissful/Blissful
 
-# Or use Docker Compose
-# 1. Create docker-compose.yml (see example below)
-# 2. Run:
-docker-compose up -d
+# Build the image and start Blissful + the blissful-pot sidecar
+docker compose up -d --build
 
-# 3. View logs
-docker-compose logs -f blissful
+# View logs
+docker compose logs -f blissful
+docker compose logs -f blissful-pot
 ```
 
-**Example docker-compose.yml:**
-```yaml
-version: '3.8'
-services:
-  blissful:
-    image: angablade/blissful:latest
-    container_name: blissful
-    ports:
-      - "7373:7373"
-    volumes:
-      - ./config.json:/app/config.json
-      - ./downloads:/app/downloads
-    restart: unless-stopped
+`docker-compose.yml` builds the image from the repo, runs both services on the
+shared `blissful-network`, mounts `yt-dlp.conf` read-only, and maps the music
+library at `/media/Music`. The `blissful-pot` service publishes no host port.
+
+**Alternative: use the published image** `angablade/blissful:latest`:
+
+```bash
+# In docker-compose.yml, comment out `build: .` and uncomment `image:`
+docker compose up -d
+
+# Bootstrap Deno + PO provider once (see the 403 section above)
+docker cp scripts/setup-ytdlp-runtime.sh blissful:/tmp/setup-ytdlp-runtime.sh
+docker exec -u 0 blissful sh /tmp/setup-ytdlp-runtime.sh
 ```
 
 **Access:** http://localhost:7373
@@ -278,6 +319,22 @@ pip install --upgrade yt-dlp
 # Test FFmpeg
 ffmpeg -version
 ```
+
+**For YouTube / YouTube Music 403s specifically**, check the runtime:
+
+```bash
+curl -s http://localhost:7373/api/health
+# Look for js_runtime_available and pot_provider_reachable
+
+# In Docker, ensure the sidecar is up and on the same network
+docker compose ps
+docker compose logs blissful-pot
+```
+
+If `js_runtime_available` is false, run the bootstrap script (published image)
+or rebuild from the repo. If `pot_provider_reachable` is false, confirm both
+containers use `blissful-network` and that `yt-dlp.conf` is mounted at
+`/app/downloads/yt-dlp.conf`.
 
 ### **Userscript Not Showing**
 

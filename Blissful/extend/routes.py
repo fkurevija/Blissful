@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 def register_routes(app, config_manager, lidarr_client, download_manager, 
                     audio_converter, source_manager, auth_manager, 
                     request_manager, album_manager, track_manager, 
-                    sources_api, system_utils):
+                    sources_api, system_utils, job_manager=None):
     """
     Register all API routes with the Flask app
     
@@ -47,13 +47,27 @@ def register_routes(app, config_manager, lidarr_client, download_manager,
     
     @app.route('/api/health', methods=['GET'])
     def health_check():
-        """Health check endpoint"""
-        return jsonify({
+        """Public health endpoint (never echoes credentials)."""
+        health = {
             'status': 'healthy',
             'version': '1.0.0',
             'ffmpeg_available': audio_converter.check_ffmpeg(),
-            'ytdlp_available': download_manager.check_ytdlp()
-        })
+            'ytdlp_available': download_manager.check_ytdlp(),
+        }
+        try:
+            health.update(system_utils.check_runtime_health())
+        except Exception as exc:
+            logger.warning("Runtime health check failed: %s", exc)
+        health['lidarr_reachable'] = False
+        try:
+            config = config_manager.get_config()
+            if config.get('lidarr_url') and config.get('lidarr_api_key'):
+                probe = lidarr_client(url=config['lidarr_url'],
+                                      api_key=config['lidarr_api_key'])
+                health['lidarr_reachable'] = bool(probe.test_connection().get('success'))
+        except Exception as exc:
+            logger.debug("Lidarr health probe failed: %s", exc)
+        return jsonify(health)
     
     @app.route('/api/config', methods=['GET'])
     def get_config():
@@ -66,14 +80,20 @@ def register_routes(app, config_manager, lidarr_client, download_manager,
             safe_config['jellyfin_api_key'] = '***MASKED***'
         if 'emby_api_key' in safe_config and safe_config['emby_api_key']:
             safe_config['emby_api_key'] = '***MASKED***'
+        for secret_key in ('auth_token', 'spotify_client_secret'):
+            if safe_config.get(secret_key):
+                safe_config[secret_key] = '***MASKED***'
         return jsonify(safe_config)
     
     @app.route('/api/config', methods=['POST'])
     def save_config():
-        """Save configuration"""
+        """Merge the submitted fields over saved configuration and persist."""
         try:
-            data = request.json
-            config_manager.save_config(data)
+            data = request.json or {}
+            merged = config_manager.get_config()
+            merged.update(data)
+            if not config_manager.save_config(merged):
+                return jsonify({'success': False, 'error': 'Could not write configuration'}), 500
             return jsonify({'success': True, 'message': 'Configuration saved successfully'})
         except Exception as e:
             logger.error(f"Error saving configuration: {e}")
@@ -171,13 +191,69 @@ def register_routes(app, config_manager, lidarr_client, download_manager,
                     'error': f'Missing required field: {field}'
                 }), 400
         
-        result = album_manager.download_album(
-            artist=data.get('artist'),
-            album=data.get('album'),
-            tracks=data.get('tracks', []),
-            target_path=data.get('target_path', '')
-        )
+        payload = {
+            'artist': data.get('artist'),
+            'album': data.get('album'),
+            'album_id': data.get('album_id'),
+            'tracks': data.get('tracks', []),
+            'target_path': data.get('target_path', ''),
+            'source': data.get('source', 'manual'),
+        }
+        if job_manager and config_manager.get_setting('enable_jobs', True):
+            job, duplicate = job_manager.enqueue('album', payload)
+            return jsonify({
+                'success': True,
+                'queued': True,
+                'duplicate': duplicate,
+                'job': job,
+            }), 202
+        result = album_manager.download_album(**{k: payload[k] for k in
+                                                 ('artist', 'album', 'tracks', 'target_path')})
         return jsonify(result)
+
+    # ==================== JOB ROUTES ====================
+
+    @app.route('/api/jobs', methods=['GET'])
+    def list_jobs():
+        """List recent download jobs."""
+        if not job_manager:
+            return jsonify({'success': False, 'error': 'Job queue unavailable'}), 404
+        status = request.args.get('status')
+        limit = request.args.get('limit', 100)
+        try:
+            limit = int(limit)
+        except (ValueError, TypeError):
+            limit = 100
+        return jsonify({'success': True, 'jobs': job_manager.list_jobs(limit=limit, status=status)})
+
+    @app.route('/api/jobs/<job_id>/retry', methods=['POST'])
+    def retry_job(job_id):
+        if not job_manager:
+            return jsonify({'success': False, 'error': 'Job queue unavailable'}), 404
+        job, changed = job_manager.retry(job_id)
+        if job is None:
+            return jsonify({'success': False, 'error': 'Job not found'}), 404
+        return jsonify({'success': True, 'job': job, 'restarted': changed})
+
+    @app.route('/api/lidarr/webhook', methods=['POST'])
+    def lidarr_webhook():
+        """Accept a Lidarr webhook and enqueue the album it refers to."""
+        if not job_manager:
+            return jsonify({'success': False, 'error': 'Job queue unavailable'}), 404
+        data = request.json or {}
+        tracks = data.get('tracks') or []
+        payload = {
+            'artist': (data.get('artist') or {}).get('artistName') or data.get('artistName', ''),
+            'album': data.get('album') or data.get('albumTitle', ''),
+            'album_id': data.get('albumId'),
+            'tracks': tracks,
+            'target_path': data.get('path', ''),
+            'source': 'lidarr-webhook',
+        }
+        if not payload['artist'] or not payload['album']:
+            return jsonify({'success': False, 'error': 'Webhook missing artist/album'}), 400
+        job, duplicate = job_manager.enqueue('album', payload)
+        return jsonify({'success': True, 'queued': True, 'duplicate': duplicate, 'job': job}), 202
     
     # ==================== TRACK DOWNLOAD ROUTE ====================
     
@@ -200,7 +276,11 @@ def register_routes(app, config_manager, lidarr_client, download_manager,
             title=data.get('title'),
             album=data.get('album', ''),
             album_id=data.get('album_id'),
-            track_number=data.get('track_number', 1)
+            track_number=data.get('track_number', 1),
+            expected_duration=data.get('duration'),
+            disc_number=data.get('disc_number'),
+            year=data.get('year'),
+            genre=data.get('genre')
         )
         
         if not result['success']:
@@ -210,45 +290,37 @@ def register_routes(app, config_manager, lidarr_client, download_manager,
     
     # ==================== LIDARR ROUTES ====================
     
+    def _lidarr_from_request(data):
+        """Build a client from the request, falling back to saved settings."""
+        saved = config_manager.get_config()
+        url = data.get('lidarr_url') or saved.get('lidarr_url', '')
+        api_key = data.get('lidarr_api_key') or saved.get('lidarr_api_key', '')
+        if api_key in ('***KEEP_EXISTING***', '***MASKED***'):
+            api_key = saved.get('lidarr_api_key', '')
+        if not url or not api_key:
+            return None, 'Lidarr URL and API key are required'
+        return lidarr_client(url=url, api_key=api_key), None
+
     @app.route('/api/test-lidarr', methods=['POST'])
     def test_lidarr_connection():
-        """Test Lidarr connection"""
+        """Test Lidarr connection without ever returning the API key."""
         try:
-            data = request.json
-            lidarr = lidarr_client(
-                url=data.get('lidarr_url'),
-                api_key=data.get('lidarr_api_key')
-            )
-            status = lidarr.test_connection()
-            return jsonify(status)
+            client, error = _lidarr_from_request(request.json or {})
+            if error:
+                return jsonify({'success': False, 'error': error}), 400
+            return jsonify(client.test_connection())
         except Exception as e:
             logger.error(f"Error testing Lidarr connection: {e}")
-            return jsonify({'success': False, 'error': str(e)}), 500
-    
-    @app.route('/api/get-api-key', methods=['POST'])
-    def get_api_key():
-        """Get the actual API key for testing (not masked)"""
-        try:
-            config = config_manager.get_config()
-            api_key = config.get('lidarr_api_key', '')
-            
-            if api_key:
-                return jsonify({'success': True, 'api_key': api_key})
-            else:
-                return jsonify({'success': False, 'error': 'No API key configured'})
-        except Exception as e:
-            logger.error(f"Error getting API key: {e}")
             return jsonify({'success': False, 'error': str(e)}), 500
     
     @app.route('/api/lidarr-paths', methods=['POST'])
     def get_lidarr_paths():
         """Get root folders from Lidarr for path mapping"""
         try:
-            data = request.json
-            lidarr = lidarr_client(
-                url=data.get('lidarr_url'),
-                api_key=data.get('lidarr_api_key')
-            )
+            client, error = _lidarr_from_request(request.json or {})
+            if error:
+                return jsonify({'success': False, 'error': error}), 400
+            lidarr = client
             
             status = lidarr.test_connection()
             if not status.get('success'):
