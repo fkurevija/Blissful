@@ -861,3 +861,32 @@ def test_gapfill_job_poll_reports_progress(monkeypatch):
                            timeout_s=5)
     assert result['status'] == 'succeeded'
     assert 'download job running' in phases
+
+
+def test_download_manager_reports_source_attempts(monkeypatch, tmp_path):
+    manager = DownloadManager(download_dir=str(tmp_path / 'downloads'))
+    manager.reset_download_progress()
+
+    calls = {'n': 0}
+
+    def fake_download(source, artist, title, expected_duration=None):
+        calls['n'] += 1
+        if calls['n'] == 1:
+            return {'success': False, 'error': 'DRM protected'}
+        return {'success': True, 'file_path': str(tmp_path / 'song.mp3'),
+                'duration': 180.0}
+
+    monkeypatch.setattr(manager, '_download_from_source', fake_download)
+    result = manager.download_track(
+        'Artist', 'Song', album='Album',
+        source_priorities=[{'name': 'YouTube Music', 'search': 'music.youtube.com',
+                            'enabled': True},
+                           {'name': 'SoundCloud', 'search': 'soundcloud.com',
+                            'enabled': True}],
+    )
+    assert result['success'] is True
+    progress = manager.get_download_progress()
+    assert progress['title'] == 'Song'
+    assert progress['album'] == 'Album'
+    assert [a['status'] for a in progress['attempts']] == ['failed', 'success']
+    assert progress['status'] == 'downloaded'

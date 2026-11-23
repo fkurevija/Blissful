@@ -470,12 +470,29 @@ class FailedImportsRetry:
         entry = self._album_report(aid)
         client = self._get_client()
 
+        extra = {'album_id': aid}
+
         def report_phase(phase, **details):
-            if progress:
-                try:
-                    progress(phase, **details)
-                except Exception:
-                    pass
+            if not progress:
+                return
+            payload = dict(details)
+            payload.update(extra)
+            try:
+                downloader = getattr(self, 'download_manager', None)
+                if downloader is not None and hasattr(downloader,
+                                                      'get_download_progress'):
+                    snap = downloader.get_download_progress() or {}
+                    for key in ('title', 'artist', 'source', 'status',
+                                'attempts', 'pending'):
+                        if key in snap:
+                            name = 'track' if key == 'title' else key
+                            payload['download_' + name] = snap[key]
+            except Exception:
+                pass
+            try:
+                progress(phase, **payload)
+            except Exception:
+                pass
 
         if timeout_s is None:
             try:
@@ -506,6 +523,7 @@ class FailedImportsRetry:
                 entry.update(status='skipped', reason='album not found')
                 return entry
             title = str(album.get('title') or '')
+            extra['album_title'] = title
             entry['title'] = title
             if not album.get('monitored'):
                 entry.update(status='skipped', reason='album is unmonitored')

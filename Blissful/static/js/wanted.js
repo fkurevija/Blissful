@@ -99,12 +99,30 @@ async function pollWantedProgress(label) {
             if (active && active.kind === 'cleanup') {
                 detail = active.phase || 'searching';
                 const parts = [];
-                for (const key of ['album', 'missing', 'job_status', 'tracks',
-                                   'verified', 'total', 'files', 'searched',
-                                   'imported', 'deleted']) {
-                    if (active[key] !== undefined && active[key] !== null) {
-                        parts.push(`${key} ${active[key]}`);
+                if (active.album_title) {
+                    parts.push(`${active.album_title} (#${active.album_id || active.album})`);
+                } else if (active.album) {
+                    parts.push(`album #${active.album}`);
+                }
+                for (const key of ['missing', 'tracks', 'job_status',
+                                   'download_track', 'download_source',
+                                   'download_status', 'download_pending',
+                                   'verified', 'total', 'searched', 'imported',
+                                   'deleted']) {
+                    if (active[key] !== undefined && active[key] !== null && active[key] !== '') {
+                        parts.push(`${key.replace('download_', '')} ${active[key]}`);
                     }
+                }
+                const attempts = active.download_attempts || [];
+                if (attempts.length) {
+                    const marks = attempts.slice(-4).map(a => {
+                        const name = String(a.source || '')
+                            .replace(/^(yt|sc)search1:/, '').split(':')[0];
+                        const mark = a.status === 'success' ? '✓'
+                            : a.status === 'rejected' ? '⊘' : '✗';
+                        return `${name} ${mark}`;
+                    });
+                    if (marks.length) parts.push('sources ' + marks.join(', '));
                 }
                 if (parts.length) detail += ' · ' + parts.join(', ');
             }

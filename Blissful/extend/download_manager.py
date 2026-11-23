@@ -1,6 +1,7 @@
 ﻿import yt_dlp
 import os
 import json
+import threading
 import logging
 import shutil
 from pathlib import Path
@@ -16,6 +17,11 @@ except (ImportError, ValueError):  # pragma: no cover - standalone module import
         BandcampResolver = None
 
 logger = logging.getLogger(__name__)
+
+# Live download progress for the Wanted tab. One worker processes jobs, so a
+# single snapshot is enough; reads from the web thread are guarded.
+DOWNLOAD_PROGRESS = {}
+_DOWNLOAD_PROGRESS_LOCK = threading.Lock()
 
 _DEFAULT_POT_URL = 'http://blissful-pot:4416'
 _DEFAULT_DENO_PATH = '/usr/local/bin/deno'
@@ -244,6 +250,29 @@ class DownloadManager:
 
         return ydl_opts
 
+    # ----------------------------------------------------------- progress
+    def get_download_progress(self):
+        """Snapshot of the current download attempt (safe cross-thread read)."""
+        with _DOWNLOAD_PROGRESS_LOCK:
+            return dict(DOWNLOAD_PROGRESS)
+
+    def _set_download_progress(self, **updates):
+        with _DOWNLOAD_PROGRESS_LOCK:
+            DOWNLOAD_PROGRESS.update(updates)
+            return dict(DOWNLOAD_PROGRESS)
+
+    def _add_source_attempt(self, source, status, reason=''):
+        with _DOWNLOAD_PROGRESS_LOCK:
+            attempts = list(DOWNLOAD_PROGRESS.get('attempts') or [])
+            attempts.append({'source': str(source), 'status': status,
+                             'reason': str(reason or '')[:120]})
+            DOWNLOAD_PROGRESS['attempts'] = attempts[-8:]
+            return dict(DOWNLOAD_PROGRESS)
+
+    def reset_download_progress(self):
+        with _DOWNLOAD_PROGRESS_LOCK:
+            DOWNLOAD_PROGRESS.clear()
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -334,20 +363,28 @@ class DownloadManager:
                     f"scsearch1:{search_query}",  # SoundCloud search
                 ]
 
+            self._set_download_progress(
+                artist=artist, album=album or '', title=title,
+                source=None, status='searching', attempts=[], pending=len(sources))
+
             tolerance = self._duration_tolerance()
             downloaded_file = None
             final_duration = None
             final_thumbnail = None
             last_error = None
 
-            for source in sources:
+            for index, source in enumerate(sources, 1):
                 try:
+                    self._set_download_progress(
+                        source=source, status='trying',
+                        pending=max(0, len(sources) - index))
                     logger.info(f"Trying source: {source}")
                     result = self._download_from_source(
                         source, artist, title, expected_duration=expected_duration)
 
                     if not result or not result.get('success'):
                         last_error = (result or {}).get('error')
+                        self._add_source_attempt(source, 'failed', last_error)
                         continue
 
                     duration = result.get('duration')
@@ -360,16 +397,21 @@ class DownloadManager:
                             'Rejected candidate from %s: duration %s outside tolerance of %ss',
                             source, duration, expected_duration)
                         last_error = 'Duration mismatch'
+                        self._add_source_attempt(source, 'rejected', last_error)
                         continue
 
                     downloaded_file = result.get('file_path')
                     final_duration = duration
                     final_thumbnail = result.get('thumbnail_path')
+                    self._add_source_attempt(source, 'success')
+                    self._set_download_progress(status='downloaded', source=source,
+                                                pending=max(0, len(sources) - index))
                     break
 
                 except Exception as e:
                     logger.warning(f"Failed to download from source {source}: {e}")
                     last_error = str(e)
+                    self._add_source_attempt(source, 'failed', last_error)
                     continue
 
             if downloaded_file:
