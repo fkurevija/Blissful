@@ -9,6 +9,7 @@ import json
 import os
 import logging
 import sys
+from pathlib import Path
 from urllib.parse import urlparse
 
 # Import configuration and managers from extend folder
@@ -118,6 +119,23 @@ def _allowed_origins():
         if parsed.scheme and parsed.netloc:
             origins.add(f"{parsed.scheme}://{parsed.netloc}")
     return origins
+
+
+# Static assets (especially the Wanted tab JS) change often; a mtime-derived
+# query string busts stale browser caches after an image update.
+_STATIC_DIR = Path(__file__).resolve().parent / 'static'
+try:
+    _STATIC_VERSION = max(
+        (int(f.stat().st_mtime) for f in _STATIC_DIR.rglob('*') if f.is_file()),
+        default=0
+    )
+except OSError:
+    _STATIC_VERSION = 0
+
+
+@app.context_processor
+def inject_static_version():
+    return {'static_version': _STATIC_VERSION}
 
 
 @app.after_request
