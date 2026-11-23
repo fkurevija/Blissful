@@ -254,6 +254,12 @@ class SystemUtils:
                 f"microserviceUrl: {json.dumps(server_url)}"
             )
 
+            # Replace the DEFAULT_MICROSERVICE_URL constant
+            script_content = script_content.replace(
+                "DEFAULT_MICROSERVICE_URL = 'http://localhost:7373'",
+                f"DEFAULT_MICROSERVICE_URL = {json.dumps(server_url)}"
+            )
+
             # Wire the optional API token into the generated userscript.
             token = os.environ.get('BLISSFUL_AUTH_TOKEN', '') or config.get('auth_token', '')
             script_content = script_content.replace(

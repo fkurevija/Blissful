@@ -1,7 +1,7 @@
 ﻿// ==UserScript==
 // @name         Blissful - Lidarr Music Downloader
 // @namespace    http://tampermonkey.net/
-// @version      1.4.0
+// @version      1.4.2
 // @description  Download missing tracks, albums, or everything from Lidarr using Blissful microservice
 // @author       Blissful
 // @match        http://localhost:8686/*
@@ -14,13 +14,18 @@
 // @grant        GM.setValue
 // @grant        GM_getValue
 // @grant        GM_setValue
-// @run-at       document-end
+// @connect      localhost
+// @connect      127.0.0.1
+// @run-at       document-idle
 // ==/UserScript==
 
 (function() {
     'use strict';
 
-    console.log('[Blissful] Script starting v1.4.0...');
+    // The generator replaces this with the live server URL.
+    const DEFAULT_MICROSERVICE_URL = 'http://localhost:7373';
+
+    console.log('[Blissful] Script starting v1.4.2...');
 
     // Compatibility layer for Greasemonkey 4 and Tampermonkey
     const GM_API = {
@@ -57,28 +62,36 @@
 
     // Configuration
     let CONFIG = {
-        microserviceUrl: 'http://localhost:7373',
+        microserviceUrl: DEFAULT_MICROSERVICE_URL,
         authToken: '__BLISSFUL_AUTH_TOKEN__',
         autoRetry: true,
         showNotifications: true
     };
 
-    // Load config asynchronously
+    function normalizeBaseUrl(url) {
+        return String(url || DEFAULT_MICROSERVICE_URL).trim().replace(/\/+$/, '');
+    }
+
+    // Load config asynchronously; ignore a stale stored localhost URL.
     async function loadConfig() {
         try {
-            CONFIG.microserviceUrl = await GM_API.getValue('microserviceUrl', CONFIG.microserviceUrl);
+            const storedUrl = await GM_API.getValue('microserviceUrl', DEFAULT_MICROSERVICE_URL);
+            CONFIG.microserviceUrl = normalizeBaseUrl(
+                storedUrl === 'http://localhost:7373' ? DEFAULT_MICROSERVICE_URL : storedUrl
+            );
             CONFIG.authToken = await GM_API.getValue('authToken', CONFIG.authToken);
             CONFIG.autoRetry = await GM_API.getValue('autoRetry', true);
             CONFIG.showNotifications = await GM_API.getValue('showNotifications', true);
             console.log('[Blissful] Using microservice URL:', CONFIG.microserviceUrl);
         } catch (e) {
+            CONFIG.microserviceUrl = DEFAULT_MICROSERVICE_URL;
             console.log('[Blissful] Using default config:', e);
         }
     }
 
     // Utility: Show notification
     function showNotification(message, type = 'info') {
-        if (!CONFIG.showNotifications) return;
+        if (!CONFIG.showNotifications || !document.body) return;
 
         const notification = document.createElement('div');
         notification.style.cssText = `
@@ -126,29 +139,29 @@
             GM_API.xmlHttpRequest({
                 method: data ? 'POST' : 'GET',
                 url: `${CONFIG.microserviceUrl}${endpoint}`,
+                timeout: 30000,
                 headers: {
                     'Content-Type': 'application/json',
                     ...(CONFIG.authToken ? { 'Authorization': `Bearer ${CONFIG.authToken}` } : {}),
                 },
                 data: data ? JSON.stringify(data) : null,
                 onload: (response) => {
-                    console.log('[Blissful] API response:', response.status, response.responseText.substring(0, 200));
+                    const text = response.responseText || '';
+                    let result;
                     try {
-                        const result = JSON.parse(response.responseText);
-                        resolve(result);
+                        result = JSON.parse(text);
                     } catch (e) {
-                        console.error('[Blissful] Failed to parse response:', e);
-                        reject(new Error('Invalid JSON response'));
+                        reject(new Error(`Invalid JSON (HTTP ${response.status})`));
+                        return;
                     }
+                    if (response.status < 200 || response.status >= 300) {
+                        reject(new Error(result?.error || `HTTP ${response.status}`));
+                        return;
+                    }
+                    resolve(result);
                 },
-                onerror: (error) => {
-                    console.error('[Blissful] Network error:', error);
-                    reject(new Error('Network error'));
-                },
-                ontimeout: () => {
-                    console.error('[Blissful] Request timeout');
-                    reject(new Error('Request timeout'));
-                }
+                onerror: () => reject(new Error(`Network error reaching ${CONFIG.microserviceUrl}`)),
+                ontimeout: () => reject(new Error('Request timeout'))
             });
         });
     }
@@ -298,8 +311,26 @@
 
     // Extract album ID from URL
     function getAlbumIdFromUrl() {
-        const match = window.location.pathname.match(/\/album\/([a-f0-9-]+)/);
+        const match = window.location.pathname.match(/\/album\/([a-zA-Z0-9-]+)/);
         return match ? match[1] : null;
+    }
+
+    // Last-resort album metadata from the Lidarr page itself. Lidarr's SPA
+    // often renders the title/artist before the backend can resolve the UUID.
+    function buildDomFallbackAlbumInfo(albumId) {
+        const titleFromPage = (document.title || '').replace(/\s*-\s*Lidarr\s*$/i, '').trim();
+        const headingEl = document.querySelector('[class*="AlbumDetails-title"], h2, h1');
+        const title = (headingEl && headingEl.textContent.trim()) || titleFromPage;
+        const artistLink = document.querySelector('a[href*="/artist/"]');
+        const artist = artistLink ? artistLink.textContent.trim() : '';
+        if (!title) return null;
+        return {
+            title,
+            artist,
+            foreignAlbumId: albumId,
+            lidarrAlbumId: null,
+            isFallback: true
+        };
     }
 
     // Extract album info via backend microservice
@@ -342,14 +373,20 @@
                 cachedAlbumInfo = albumInfo;
                 return albumInfo;
             } else {
-                console.error('[Blissful] Microservice returned error:', result.error);
-                return null;
+                console.warn('[Blissful] Microservice returned error:', result.error);
             }
             
         } catch (error) {
-            console.error('[Blissful] Error fetching album info from microservice:', error);
-            return null;
+            console.warn('[Blissful] album-info lookup failed:', error?.message || error);
         }
+
+        const fallback = buildDomFallbackAlbumInfo(albumId);
+        if (fallback) {
+            console.log('[Blissful] Using DOM fallback album info:', fallback);
+            cachedAlbumInfo = fallback;
+            return fallback;
+        }
+        return null;
     }
 
     // Inject download icons in album search cells (artist page, wanted/missing)
@@ -486,7 +523,11 @@
     }
 
     // Inject download icons in track actions cells (album track list)
+    let isInjectingTracks = false;
     async function injectTrackActionIcons() {
+        if (isInjectingTracks) return;
+        isInjectingTracks = true;
+        try {
         console.log('[Blissful] Injecting track action icons...');
         console.log('[Blissful] Current pathname:', window.location.pathname);
         
@@ -643,11 +684,14 @@
         });
 
         console.log(`[Blissful] Total track icons added: ${iconsAdded}`);
+        } finally {
+            isInjectingTracks = false;
+        }
     }
 
     // Initialize
     async function init() {
-        console.log('[Blissful] Initializing userscript v1.4.0');
+        console.log('[Blissful] Initializing userscript v1.4.2');
         console.log('[Blissful] Page URL:', window.location.href);
         console.log('[Blissful] DOM state:', document.readyState);
 
@@ -665,6 +709,13 @@
             }
         }
 
+        // Lidarr's SPA fires many mutations; debounce injections.
+        let debounceTimer = null;
+        function scheduleInject() {
+            clearTimeout(debounceTimer);
+            debounceTimer = setTimeout(injectIcons, 150);
+        }
+
         // Wait for page to be ready
         if (document.readyState === 'loading') {
             console.log('[Blissful] Waiting for DOM to load...');
@@ -679,7 +730,7 @@
 
         // Watch for dynamic content changes
         const observer = new MutationObserver(() => {
-            injectIcons();
+            scheduleInject();
         });
 
         observer.observe(document.body, {

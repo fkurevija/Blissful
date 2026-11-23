@@ -221,7 +221,8 @@ def test_userscript_injects_token_and_server_url(tmp_path):
     script, error = SystemUtils(cfg).generate_userscript('http://blissful.local:7373')
     assert error is None
     assert 'authToken: "script-token"' in script
-    assert 'microserviceUrl: "http://blissful.local:7373"' in script
+    assert 'DEFAULT_MICROSERVICE_URL = "http://blissful.local:7373"' in script
+    assert 'microserviceUrl: DEFAULT_MICROSERVICE_URL' in script
     assert '${CONFIG.authToken}' in script
 
 
