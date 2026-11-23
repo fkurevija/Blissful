@@ -11,8 +11,45 @@ async function wantedApi(url, options = {}) {
     } catch (e) {
         throw new Error(`Invalid response (HTTP ${response.status})`);
     }
-    if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+    if (!response.ok) {
+        const error = new Error(data.error || `HTTP ${response.status}`);
+        error.data = data;
+        error.status = response.status;
+        throw error;
+    }
     return data;
+}
+
+const WANTED_ACTION_IDS = ['searchSelected', 'searchAll', 'cleanupStale'];
+
+function setWantedButtonsBusy(busy) {
+    WANTED_ACTION_IDS.forEach(id => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.disabled = busy;
+        el.title = busy ? 'A wanted search or cleanup is already running' : '';
+    });
+}
+
+let wantedActiveShown = false;
+
+function applyWantedBusy(active) {
+    setWantedButtonsBusy(!!active);
+    if (active && !wantedActiveShown) {
+        wantedActiveShown = true;
+        beginWantedProgress('wanted-toast-run',
+            active.kind === 'cleanup' ? 'Cleaning stale torrents' : 'Searching wanted albums');
+    }
+    if (!active) wantedActiveShown = false;
+}
+
+async function watchWantedBusy() {
+    try {
+        const status = await wantedApi('/api/wanted/status');
+        applyWantedBusy(status.active);
+    } catch (e) {
+        // Status polling is best-effort; never break the page on a transient error.
+    }
 }
 
 // Sticky progress toasts for long-running wanted/cleanup actions.
@@ -138,6 +175,7 @@ async function loadWantedSettings() {
         document.getElementById('staleCleanupEnabled').checked = !!status.stale_cleanup_enabled;
         document.getElementById('staleCleanupInterval').value = status.stale_cleanup_interval_hours || 6;
         document.getElementById('staleCleanupWait').value = status.stale_cleanup_wait_minutes || 10;
+        applyWantedBusy(status.active);
     } catch (error) {
         showNotification(`Could not load wanted settings: ${error.message}`, 'error');
     }
@@ -186,6 +224,7 @@ async function runWantedSearch(mode) {
         return;
     }
     const toastId = 'wanted-toast-search';
+    setWantedButtonsBusy(true);
     beginWantedProgress(toastId, apply ? 'Queuing searches' : 'Previewing search');
     try {
         const result = await wantedApi('/api/wanted/search', {
@@ -198,7 +237,11 @@ async function runWantedSearch(mode) {
             : `Dry run complete — ${result.count} album(s) would be searched`;
         finishWantedToast(toastId, message, 'success');
     } catch (error) {
-        finishWantedToast(toastId, `Search failed: ${error.message}`, 'error');
+        const detail = error.data && error.data.active
+            ? ` (${error.data.active.kind || 'run'} in progress)` : '';
+        finishWantedToast(toastId, `Search failed: ${error.message}${detail}`, 'error');
+    } finally {
+        setWantedButtonsBusy(false);
     }
 }
 
@@ -206,6 +249,7 @@ async function runStaleCleanup() {
     const apply = document.getElementById('staleApply').checked;
     const record_ids = selectedValues('staleList', 'recordId');
     const toastId = 'wanted-toast-cleanup';
+    setWantedButtonsBusy(true);
     beginWantedProgress(toastId, apply ? 'Cleaning stale torrents' : 'Previewing cleanup');
     try {
         const result = await wantedApi('/api/stale-torrents/cleanup', {
@@ -220,7 +264,11 @@ async function runStaleCleanup() {
         finishWantedToast(toastId, message, 'success');
         if (apply) loadStale();
     } catch (error) {
-        finishWantedToast(toastId, `Cleanup failed: ${error.message}`, 'error');
+        const detail = error.data && error.data.active
+            ? ` (${error.data.active.kind || 'run'} in progress)` : '';
+        finishWantedToast(toastId, `Cleanup failed: ${error.message}${detail}`, 'error');
+    } finally {
+        setWantedButtonsBusy(false);
     }
 }
 
@@ -252,4 +300,5 @@ document.addEventListener('DOMContentLoaded', () => {
     wire('cleanupStale', runStaleCleanup);
     wire('resetWantedState', resetWantedState);
     loadWantedSettings();
+    setInterval(watchWantedBusy, 5000);
 });

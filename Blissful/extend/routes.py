@@ -367,6 +367,8 @@ def register_routes(app, config_manager, lidarr_client, download_manager,
             album_ids=data.get('album_ids'),
             apply=bool(data.get('apply', False))
         )
+        if result.get('already_running'):
+            return jsonify(result), 409
         if not result.get('success', True):
             return jsonify(result), 400
         return jsonify(result)
@@ -380,6 +382,8 @@ def register_routes(app, config_manager, lidarr_client, download_manager,
             record_ids=data.get('record_ids'),
             apply=bool(data.get('apply', False))
         )
+        if result.get('already_running'):
+            return jsonify(result), 409
         return jsonify(result)
 
     @app.route('/api/wanted/status', methods=['GET'])

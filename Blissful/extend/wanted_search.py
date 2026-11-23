@@ -100,6 +100,43 @@ class WantedSearchService:
         self._active = None
         self._last_activity = None
         self._active_lock = threading.Lock()
+        self._run_lock = threading.Lock()
+
+    # --------------------------------------------------------- single flight
+    def _busy_report(self):
+        return {
+            'success': False,
+            'already_running': True,
+            'error': 'A wanted search or cleanup is already running',
+            'active': self.get_active(),
+        }
+
+    def search(self, album_ids=None, apply=False) -> dict:
+        """Public search entry point; only one run may be active at a time."""
+        if not self._run_lock.acquire(blocking=False):
+            return self._busy_report()
+        self._set_active(kind='search', phase='preparing', started_at=time.time(),
+                         apply=bool(apply))
+        try:
+            return self._search_impl(album_ids=album_ids, apply=apply)
+        finally:
+            if self.get_active() is not None:
+                self._finish_active('completed')
+            self._run_lock.release()
+
+    def cleanup_stale(self, record_ids=None, apply=False, wait_minutes=10) -> dict:
+        """Public cleanup entry point; only one run may be active at a time."""
+        if not self._run_lock.acquire(blocking=False):
+            return self._busy_report()
+        self._set_active(kind='cleanup', phase='starting', started_at=time.time(),
+                         apply=bool(apply))
+        try:
+            return self._cleanup_impl(record_ids=record_ids, apply=apply,
+                                      wait_minutes=wait_minutes)
+        finally:
+            if self.get_active() is not None:
+                self._finish_active('failed')
+            self._run_lock.release()
 
     # ------------------------------------------------------------- progress
     def get_active(self):
@@ -379,7 +416,7 @@ class WantedSearchService:
         return ordered
 
     # ------------------------------------------------------------------ search
-    def search(self, album_ids=None, apply=False) -> dict:
+    def _search_impl(self, album_ids=None, apply=False) -> dict:
         """Search all wanted albums or a selected subset (dry-run by default)."""
         if self._config().get('wanted_search_enabled') is False:
             return {'success': False, 'error': 'Wanted search is disabled'}
@@ -487,7 +524,7 @@ class WantedSearchService:
                              'kept', 'skipped', 'errors')}
         return report
 
-    def cleanup_stale(self, record_ids=None, apply=False, wait_minutes=10) -> dict:
+    def _cleanup_impl(self, record_ids=None, apply=False, wait_minutes=10) -> dict:
         """Re-search and remove stale queue items once their files are imported.
 
         One bad album never aborts the rest; it is recorded in ``skipped`` or
@@ -713,6 +750,8 @@ class WantedSearchService:
             return report
 
         report = self.cleanup_stale(apply=bool(apply))
+        if report.get('already_running'):
+            return report
         state = self._load_state()
         state['last_run'] = {
             'timestamp': time.strftime('%Y-%m-%dT%H:%M:%S'),

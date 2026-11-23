@@ -747,3 +747,47 @@ def test_wanted_status_route_exposes_progress():
     with app.test_client() as client:
         data = client.get('/api/wanted/status').get_json()
     assert data['active']['phase'] == 'waiting for import'
+
+
+def test_wanted_single_flight_blocks_second_run(tmp_path):
+    svc = _wanted_service(tmp_path, client=object())
+    assert svc._run_lock.acquire(blocking=False) is True
+    try:
+        blocked = svc.search()
+        assert blocked['already_running'] is True
+        assert 'already running' in blocked['error']
+    finally:
+        svc._run_lock.release()
+    again = _wanted_service(tmp_path, client=object()).search()
+    assert not again.get('already_running', False)
+
+
+def test_wanted_search_route_returns_409_when_busy():
+    from flask import Flask
+    from extend.routes import register_routes
+
+    class Stub:
+        def __init__(self, *a, **k):
+            pass
+
+    class Config:
+        def get_config(self):
+            return {'wanted_search_enabled': True, 'stale_cleanup_enabled': False}
+
+    class BusyWanted:
+        def search(self, **kwargs):
+            return {'success': False, 'already_running': True,
+                    'error': 'A wanted search or cleanup is already running',
+                    'active': {'kind': 'cleanup'}}
+
+    app = Flask(__name__)
+    register_routes(app=app, config_manager=Config(), lidarr_client=Stub,
+                    download_manager=Stub(), audio_converter=Stub(),
+                    source_manager=Stub(), auth_manager=Stub(),
+                    request_manager=Stub(), album_manager=Stub(),
+                    track_manager=Stub(), sources_api=Stub(), system_utils=Stub(),
+                    job_manager=None, wanted_search=BusyWanted())
+    with app.test_client() as client:
+        response = client.post('/api/wanted/search', json={'apply': False})
+    assert response.status_code == 409
+    assert response.get_json()['already_running'] is True
