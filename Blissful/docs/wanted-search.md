@@ -33,8 +33,10 @@ run is active (including runs started by the scheduler or another tab).
    still has missing tracks is then handed to Blissful's own yt-dlp bridge —
    Lidarr tries torrents first, Blissful fills what it could not find. The
    progress toast stays up through both phases and a second search or cleanup
-   is blocked until it completes. Set `PREFER_BLISSFUL_FOR_WANTED=false` to
-   skip the Blissful fallback.
+   is blocked until it completes. The search itself is recorded as a job on the
+   **Downloads** tab; clicking **View downloads** only switches tabs and never
+   cancels the request. Set `PREFER_BLISSFUL_FOR_WANTED=false` to skip the Blissful
+   fallback.
 
 ## Stale torrents
 

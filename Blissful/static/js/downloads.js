@@ -62,11 +62,20 @@ function renderJobs(jobs) {
         const detail = document.createElement('td');
         detail.className = 'job-reason';
         const result = job.result || {};
+        const progress = job.progress || {};
         const parts = [];
+        if (progress.phase) parts.push(progress.phase);
+        if (progress.album_title) parts.push(progress.album_title);
+        if (progress.processed !== undefined && progress.total) {
+            parts.push(`${progress.processed}/${progress.total}`);
+        }
+        if (progress.command_status) parts.push(`Lidarr: ${progress.command_status}`);
         if (job.failure_reason) parts.push(job.failure_reason);
         if (result.successful !== undefined) parts.push(`${result.successful} imported`);
         if (result.failed) parts.push(`${result.failed} failed`);
         if (result.total_tracks) parts.push(`${result.total_tracks} total`);
+        if (result.command) parts.push(`command ${result.command}`);
+        if (result.blissful_fallback) parts.push(`${result.blissful_fallback} Blissful fallback`);
         detail.textContent = parts.join(' · ');
         row.appendChild(detail);
 

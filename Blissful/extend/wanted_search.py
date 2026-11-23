@@ -90,11 +90,12 @@ class WantedSearchService:
 
     def __init__(self, config_manager, lidarr_client_class,
                  state_path='/app/downloads/wanted-search-state.json',
-                 gapfill=None):
+                 gapfill=None, job_manager=None):
         self.config_manager = config_manager
         self.lidarr_client_class = lidarr_client_class
         self.state_path = Path(state_path)
         self.gapfill = gapfill
+        self.job_manager = job_manager
         self._client = None
         self._stop_event = None
         self._scheduler_thread = None
@@ -482,6 +483,31 @@ class WantedSearchService:
             report['success'] = False
             report['error'] = 'Lidarr client unavailable'
             return report
+
+        search_job = None
+        if self.job_manager is not None:
+            try:
+                search_job, _duplicate = self.job_manager.enqueue('search', {
+                    'mode': mode,
+                    'album_ids': ids,
+                    'count': len(wanted),
+                    'source': 'wanted-search',
+                }, dedupe_key='wanted-search-run-%s' % time.time())
+                if search_job:
+                    self.job_manager.update_job(
+                        search_job['id'], status='running',
+                        progress={'phase': 'starting', 'processed': 0,
+                                  'total': len(wanted)})
+            except Exception:
+                search_job = None
+
+        def job_progress(**changes):
+            if search_job:
+                try:
+                    self.job_manager.update_job(search_job['id'], **changes)
+                except Exception:
+                    pass
+
         try:
             if ids:
                 response = client.post_command('AlbumSearch', albumIds=ids)
@@ -502,6 +528,7 @@ class WantedSearchService:
         def progress(phase, **details):
             self._set_active(phase=phase, kind='search', mode=mode,
                              count=len(wanted), **details)
+            job_progress(progress={'phase': phase, **details})
 
         progress('Lidarr search queued', command_status='queued')
         try:
@@ -518,6 +545,7 @@ class WantedSearchService:
             report['success'] = False
             report['error'] = (report['command_message'] or
                                'Lidarr search did not complete')
+        job_progress(command_status=status)
 
         # Lidarr searches torrents first. Anything it still cannot source is
         # handed to Blissful's own yt-dlp bridge, which is why users come here.
@@ -552,6 +580,12 @@ class WantedSearchService:
                 if gap_status not in ('succeeded', 'success', 'skipped'):
                     report['success'] = False
             progress('search finished', fallback=len(report['fallback']))
+        job_progress(
+            status='succeeded' if report['success'] else 'failed',
+            failure_reason=None if report['success'] else report.get('error', ''),
+            result={'command': status, 'albums': len(wanted),
+                    'blissful_fallback': len(report['fallback'])},
+        )
         return report
 
     # ----------------------------------------------------------------- cleanup

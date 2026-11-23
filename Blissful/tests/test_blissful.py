@@ -979,3 +979,55 @@ def test_stale_item_with_no_missing_tracks_is_skipped_with_reason(tmp_path, monk
     assert report['counts']['kept'] == 0
     assert report['counts']['deleted'] == 0
     assert report['skipped'][0]['reason'] == 'no missing tracks in Lidarr'
+
+
+def test_wanted_search_creates_downloads_job(tmp_path):
+    from extend.wanted_search import WantedSearchService
+
+    class Config:
+        def get_config(self):
+            return {'wanted_search_enabled': True,
+                    'wanted_search_timeout_minutes': 10,
+                    'prefer_blissful_for_wanted': True}
+
+    class Client:
+        def get_wanted_missing(self, page=1, page_size=200):
+            return {'totalRecords': 1, 'records': [{
+                'id': 9, 'title': 'Album', 'artist': {'artistName': 'Artist'}}]}
+
+        def get_album_tracks(self, aid):
+            return [{'id': 1, 'hasFile': False}]
+
+        def post_command(self, name, **body):
+            return {'id': 5}
+
+        def get_command(self, cid):
+            return {'id': cid, 'status': 'completed', 'message': 'ok'}
+
+    class Gapfill:
+        def gapfill_album(self, aid, apply=True, source='', progress=None):
+            return {'status': 'succeeded', 'imported': 1}
+
+    class Jobs:
+        def __init__(self):
+            self.record = {}
+
+        def enqueue(self, kind, payload, dedupe_key=None):
+            self.record = {'id': 'job-1', 'kind': kind, 'payload': payload,
+                           'status': 'pending'}
+            return self.record, False
+
+        def update_job(self, job_id, **changes):
+            self.record.update(changes)
+            return self.record
+
+    jobs = Jobs()
+    svc = WantedSearchService(Config(), Client(), str(tmp_path / 'state.json'),
+                              gapfill=Gapfill(), job_manager=jobs)
+    svc._client = Client()
+    result = svc.search(apply=True)
+    assert result['success'] is True
+    assert jobs.record['kind'] == 'search'
+    assert jobs.record['status'] == 'succeeded'
+    assert jobs.record['progress']['phase'] == 'search finished'
+    assert jobs.record['result']['blissful_fallback'] == 1

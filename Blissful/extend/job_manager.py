@@ -31,6 +31,9 @@ class JobManager:
         self._lock = threading.RLock()
         self._stop = threading.Event()
         self._thread = None
+        # Only these kinds are executed by the built-in worker; other kinds
+        # (e.g. a long-running API search) are driven by their own service.
+        self.managed_kinds = {'album'}
         self.jobs = self._load()
 
     # ------------------------------------------------------------------ persistence
@@ -175,10 +178,22 @@ class JobManager:
         if self._thread:
             self._thread.join(timeout=5)
 
+    def update_job(self, job_id, **changes):
+        """Update an externally-managed job (search runs, etc.)."""
+        with self._lock:
+            for job in self.jobs:
+                if job['id'] == job_id:
+                    job.update(changes)
+                    job['updated_at'] = _now()
+                    self._persist()
+                    return dict(job)
+        return None
+
     def _next_pending(self):
         with self._lock:
             for job in self.jobs:
-                if job.get('status') == 'pending':
+                if job.get('status') == 'pending' and \
+                        job.get('kind') in self.managed_kinds:
                     job['status'] = 'running'
                     job['updated_at'] = _now()
                     self._persist()

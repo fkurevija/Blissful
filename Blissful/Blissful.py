@@ -107,7 +107,8 @@ job_manager = JobManager(config_manager, album_manager,
 failed_imports = FailedImportsRetry(config_manager, LidarrClient,
                                     download_manager, album_manager, job_manager)
 wanted_search = WantedSearchService(config_manager, LidarrClient,
-                                    gapfill=failed_imports)
+                                    gapfill=failed_imports,
+                                    job_manager=job_manager)
 
 logger.info("✅ All modular managers initialized")
 
