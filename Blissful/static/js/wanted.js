@@ -323,8 +323,11 @@ async function runWantedSearch(mode) {
             body: JSON.stringify({ mode, album_ids, apply })
         });
         wantedResult('wantedResult', result);
+        const cmd = apply && result.command_status
+            ? ` (${result.command_status}${result.command_message ? ': ' + result.command_message : ''})`
+            : '';
         const message = apply
-            ? `Search queued — ${result.count} album(s), command ${result.command_id || 'n/a'}`
+            ? `Search ${result.success ? 'completed' : 'failed'} — ${result.count} album(s)${cmd}`
             : `Dry run complete — ${result.count} album(s) would be searched`;
         finishWantedToast(message, 'success');
     } catch (error) {

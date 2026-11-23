@@ -490,6 +490,26 @@ class WantedSearchService:
             report['error'] = 'Lidarr did not return a command id'
             return report
         report['command_id'] = command_id
+
+        def progress(phase, **details):
+            self._set_active(phase=phase, kind='search', mode=mode,
+                             count=len(ids), **details)
+
+        progress('Lidarr search queued', command_status='queued')
+        try:
+            minutes = int(self._config().get('wanted_search_timeout_minutes', 10) or 10)
+        except (TypeError, ValueError):
+            minutes = 10
+        command = self._poll_command(client, command_id, progress=progress,
+                                     timeout_s=max(60, minutes * 60))
+        status = _lower(command.get('status'))
+        report['command_status'] = status
+        report['command_message'] = str(command.get('message') or '')[:200]
+        progress('Lidarr search finished', command_status=status)
+        if status not in _COMMAND_OK:
+            report['success'] = False
+            report['error'] = (report['command_message'] or
+                               'Lidarr search did not complete')
         return report
 
     # ----------------------------------------------------------------- cleanup
@@ -500,8 +520,8 @@ class WantedSearchService:
         return sum(1 for track in tracks
                    if isinstance(track, dict) and track.get('hasFile') is False)
 
-    def _poll_command(self, client, command_id):
-        deadline = time.monotonic() + _COMMAND_TIMEOUT_S
+    def _poll_command(self, client, command_id, progress=None, timeout_s=None):
+        deadline = time.monotonic() + (timeout_s or _COMMAND_TIMEOUT_S)
         last = {}
         while time.monotonic() < deadline:
             try:
@@ -510,6 +530,13 @@ class WantedSearchService:
                 return {'status': 'failed', 'message': self._safe_error(exc)}
             if not isinstance(last, dict):
                 last = {}
+            if progress:
+                try:
+                    progress('waiting for Lidarr command',
+                             command_id=command_id,
+                             command_status=_lower(last.get('status')) or 'queued')
+                except Exception:
+                    pass
             if _lower(last.get('status')) in _COMMAND_TERMINAL:
                 return last
             time.sleep(_POLL_INTERVAL_S)

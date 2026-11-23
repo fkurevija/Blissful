@@ -545,6 +545,7 @@ def test_config_has_wanted_search_defaults(tmp_path):
     assert cfg['prefer_blissful_for_stale'] is True
     assert cfg['gapfill_job_timeout_minutes'] == 15
     assert cfg['stale_cleanup_remove_from_client'] is True
+    assert cfg['wanted_search_timeout_minutes'] == 10
 
 
 def test_lidarr_wanted_and_queue_delete(monkeypatch):
@@ -628,9 +629,13 @@ def test_wanted_search_apply_posts_commands(tmp_path):
             calls.append((name, body))
             return {'id': 42}
 
+        def get_command(self, cid):
+            return {'id': cid, 'status': 'completed', 'message': 'ok'}
+
     svc = _wanted_service(tmp_path, client=Client())
     selected = svc.search(album_ids=['3', 'bad'], apply=True)
     assert selected['command_id'] == 42
+    assert selected['command_status'] == 'completed'
     assert calls == [('AlbumSearch', {'albumIds': [3]})]
 
     all_report = svc.search(apply=True)

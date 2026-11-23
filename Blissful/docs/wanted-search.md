@@ -27,7 +27,9 @@ is active (including runs started by the scheduler or another tab).
 2. Tick specific albums, or use **Search all missing**.
 3. With *Apply* unchecked you get a preview of what would be searched. With it
    checked, Blissful queues `AlbumSearch` for the selected album IDs, or
-   `MissingAlbumSearch` for all missing albums.
+   `MissingAlbumSearch` for all missing albums, then waits for the Lidarr command
+   to finish. The progress toast stays up during that wait and a second search
+   or cleanup is blocked until it completes.
 
 ## Stale torrents
 
