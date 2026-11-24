@@ -130,7 +130,7 @@ function renderJobs(jobs) {
         if (job.status === 'failed') {
             const retry = document.createElement('button');
             retry.type = 'button';
-            retry.className = 'btn btn-secondary';
+            retry.className = 'btn btn-secondary job-action';
             retry.textContent = 'Retry';
             retry.addEventListener('click', async () => {
                 try {
@@ -144,10 +144,27 @@ function renderJobs(jobs) {
             });
             actions.appendChild(retry);
         }
+        if (job.status === 'pending' || job.status === 'running') {
+            const cancel = document.createElement('button');
+            cancel.type = 'button';
+            cancel.className = 'btn btn-secondary job-action';
+            cancel.textContent = 'Cancel';
+            cancel.addEventListener('click', async () => {
+                try {
+                    const res = await fetch(`/api/jobs/${job.id}/cancel`, { method: 'POST' });
+                    const data = await res.json();
+                    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+                    loadJobs();
+                } catch (error) {
+                    showNotification(`Cancel failed: ${error.message}`, 'error');
+                }
+            });
+            actions.appendChild(cancel);
+        }
         if (job.status !== 'pending' && job.status !== 'running') {
             const del = document.createElement('button');
             del.type = 'button';
-            del.className = 'btn btn-secondary';
+            del.className = 'btn btn-secondary job-action';
             del.textContent = 'Delete';
             del.addEventListener('click', async () => {
                 try {
@@ -166,24 +183,6 @@ function renderJobs(jobs) {
     });
     table.appendChild(body);
     list.appendChild(table);
-
-    const clear = document.createElement('button');
-    clear.type = 'button';
-    clear.className = 'btn btn-secondary';
-    clear.textContent = 'Clear finished jobs';
-    clear.style.marginTop = '8px';
-    clear.addEventListener('click', async () => {
-        try {
-            const res = await fetch('/api/jobs/clear-finished', { method: 'POST' });
-            const data = await res.json();
-            if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-            showNotification(`Cleared ${data.removed} jobs`, 'success');
-            loadJobs();
-        } catch (error) {
-            showNotification(`Clear failed: ${error.message}`, 'error');
-        }
-    });
-    list.parentElement.insertBefore(clear, list.nextSibling);
 }
 
 async function loadJobs() {
@@ -211,4 +210,25 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     loadJobs();
     jobsAutoRefresh = setInterval(loadJobs, 5000);
+
+    const list = document.getElementById('jobsList');
+    if (list) {
+        const clear = document.createElement('button');
+        clear.type = 'button';
+        clear.className = 'btn btn-secondary';
+        clear.textContent = 'Clear finished jobs';
+        clear.style.marginTop = '8px';
+        clear.addEventListener('click', async () => {
+            try {
+                const res = await fetch('/api/jobs/clear-finished', { method: 'POST' });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+                showNotification(`Cleared ${data.removed} jobs`, 'success');
+                loadJobs();
+            } catch (error) {
+                showNotification(`Clear failed: ${error.message}`, 'error');
+            }
+        });
+        list.parentElement.insertBefore(clear, list.nextSibling);
+    }
 });

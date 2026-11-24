@@ -212,6 +212,35 @@ def test_job_queue_dedupe_and_retry(tmp_path):
     assert len(manager.list_jobs()) == 1
 
 
+def test_job_queue_cancel_pending_and_running(tmp_path):
+    class Config:
+        def get_setting(self, key, default=None):
+            return default
+
+    class Albums:
+        def download_album(self, **kwargs):
+            return {'success': True, 'successful': 1, 'failed': 0, 'total_tracks': 1}
+
+    manager = JobManager(Config(), Albums(), str(tmp_path / 'jobs.json'))
+    pending, _ = manager.enqueue('album', {'artist': 'A', 'album': 'B', 'tracks': []})
+    assert manager.cancel_job(pending['id']) is True
+    assert manager.get_job(pending['id'])['status'] == 'cancelled'
+
+    # Cannot cancel an already-terminal job.
+    assert manager.cancel_job(pending['id']) is False
+    assert manager.delete_job(pending['id']) is True
+    assert manager.get_job(pending['id']) is None
+
+    # clear_finished removes cancelled jobs.
+    running, _ = manager.enqueue('album', {'artist': 'C', 'album': 'D', 'tracks': []})
+    manager.jobs[0]['status'] = 'running'
+    manager._persist()
+    assert manager.cancel_job(running['id']) is True
+    removed = manager.clear_finished()
+    assert removed >= 1
+    assert [j['status'] for j in manager.list_jobs()] == []
+
+
 def test_userscript_injects_token_and_server_url(tmp_path):
     from extend.system_utils import SystemUtils
 

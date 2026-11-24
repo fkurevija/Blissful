@@ -14,7 +14,7 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-TERMINAL_STATUSES = {'succeeded', 'failed'}
+TERMINAL_STATUSES = {'succeeded', 'failed', 'cancelled'}
 
 
 def _now():
@@ -108,6 +108,20 @@ class JobManager:
                 return False
             self._persist()
             return True
+
+    def cancel_job(self, job_id):
+        """Mark a pending or running job as cancelled (terminal)."""
+        with self._lock:
+            for job in self.jobs:
+                if job['id'] == job_id:
+                    if job.get('status') not in ('pending', 'running'):
+                        return False
+                    job['status'] = 'cancelled'
+                    job['failure_reason'] = 'cancelled by user'
+                    job['updated_at'] = _now()
+                    self._persist()
+                    return True
+            return False
 
     def clear_finished(self):
         """Remove all terminal jobs, keeping pending/running ones."""

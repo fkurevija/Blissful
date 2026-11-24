@@ -236,6 +236,15 @@ def register_routes(app, config_manager, lidarr_client, download_manager,
             return jsonify({'success': False, 'error': 'Job not found'}), 404
         return jsonify({'success': True, 'job': job, 'restarted': changed})
 
+    @app.route('/api/jobs/<job_id>/cancel', methods=['POST'])
+    def cancel_job(job_id):
+        if not job_manager:
+            return jsonify({'success': False, 'error': 'Job queue unavailable'}), 404
+        ok = job_manager.cancel_job(job_id)
+        if not ok:
+            return jsonify({'success': False, 'error': 'Job not found or not cancellable'}), 404
+        return jsonify({'success': True})
+
     @app.route('/api/jobs/<job_id>', methods=['DELETE'])
     def delete_job(job_id):
         if not job_manager:
