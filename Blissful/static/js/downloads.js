@@ -185,7 +185,8 @@ function renderJobs(jobs) {
     });
     list.parentElement.insertBefore(clear, list.nextSibling);
 }
- {
+
+async function loadJobs() {
     try {
         const res = await fetch('/api/jobs?limit=100');
         const data = await res.json();
