@@ -23,29 +23,33 @@
             Metadata providers do not serve audio. They refine search metadata before
             Blissful asks YouTube, YouTube Music, SoundCloud or Bandcamp for the track.
         </p>
-        <div class="form-group">
-            <label for="spotifyClientId">Spotify Client ID</label>
-            <input type="text" id="spotifyClientId" placeholder="From Spotify Developer Dashboard">
-        </div>
-        <div class="form-group">
-            <label for="spotifyClientSecret">Spotify Client Secret</label>
-            <input type="password" id="spotifyClientSecret" placeholder="Leave blank to keep saved secret">
-        </div>
-
         <div class="form-group spotify-enable-card">
             <label for="spotifyMetadataEnabled" class="spotify-enable-label">
                 <input type="checkbox" id="spotifyMetadataEnabled">
                 <span class="spotify-enable-text">
                     <strong>Use Spotify as a metadata source</strong>
-                    <small>Optional. Refines track metadata with your Spotify credentials above; does not provide audio. Requires your own Spotify developer client ID and secret.</small>
+                    <small>Optional. Refines track metadata with your Spotify credentials below; does not provide audio. Requires your own Spotify developer client ID and secret.</small>
                 </span>
             </label>
+            <div class="spotify-credentials">
+                <div class="form-group">
+                    <label for="spotifyClientId">Spotify Client ID</label>
+                    <input type="text" id="spotifyClientId" placeholder="From Spotify Developer Dashboard">
+                </div>
+                <div class="form-group">
+                    <label for="spotifyClientSecret">Spotify Client Secret</label>
+                    <input type="password" id="spotifyClientSecret" placeholder="Leave blank to keep saved secret">
+                </div>
+            </div>
         </div>
     </div>
 </div>
 
 <style>
 .spotify-enable-card { margin-top: 24px; padding: 16px; border: 2px solid var(--primary-color, #6366f1); border-radius: 8px; background: rgba(99,102,241,0.08); }
+.spotify-enable-card .spotify-credentials { margin-top: 16px; }
+.spotify-enable-card .spotify-credentials .form-group { margin-bottom: 16px; }
+.spotify-enable-card .spotify-credentials .form-group:last-child { margin-bottom: 0; }
 .spotify-enable-card .spotify-enable-label { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 0; cursor: pointer; }
 .spotify-enable-card .spotify-enable-label input[type="checkbox"] { width: 22px; height: 22px; flex: 0 0 auto; margin-top: 2px; }
 .spotify-enable-card .spotify-enable-text strong { display: block; font-size: 1.05rem; color: var(--text-color); }
