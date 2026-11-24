@@ -1068,6 +1068,6 @@ def test_downloads_js_declares_failures_before_use():
 
     js = (Path(__file__).resolve().parents[1] / 'static' / 'js' /
           'downloads.js').read_text(encoding='utf-8')
-    declaration = js.index('const failures = result.failures')
-    first_use = js.index("job.status === 'failed' && !failures.length")
+    declaration = js.index('const failures = result.failures || []')
+    first_use = js.index("job.status === 'failed' && !result.failures?.length")
     assert declaration < first_use

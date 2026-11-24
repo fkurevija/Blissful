@@ -99,6 +99,27 @@ class JobManager:
             jobs = self.jobs if not status else [j for j in self.jobs if j.get('status') == status]
             return [dict(j) for j in jobs[:max(1, min(int(limit), 500))]]
 
+    def delete_job(self, job_id):
+        """Remove one job from history (including stuck pending records)."""
+        with self._lock:
+            before = len(self.jobs)
+            self.jobs = [job for job in self.jobs if job.get('id') != job_id]
+            if len(self.jobs) == before:
+                return False
+            self._persist()
+            return True
+
+    def clear_finished(self):
+        """Remove all terminal jobs, keeping pending/running ones."""
+        with self._lock:
+            before = len(self.jobs)
+            self.jobs = [job for job in self.jobs
+                         if job.get('status') not in TERMINAL_STATUSES]
+            removed = before - len(self.jobs)
+            if removed:
+                self._persist()
+            return removed
+
     def get_job(self, job_id):
         with self._lock:
             for job in self.jobs:

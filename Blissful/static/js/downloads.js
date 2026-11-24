@@ -105,6 +105,7 @@ function renderJobs(jobs) {
         const detail = document.createElement('td');
         detail.className = 'job-reason';
         const result = job.result || {};
+        const failures = result.failures || [];
         const progress = job.progress || {};
         const parts = [];
         if (progress.phase) parts.push(progress.phase);
@@ -113,9 +114,8 @@ function renderJobs(jobs) {
             parts.push(`${progress.processed}/${progress.total}`);
         }
         if (progress.command_status) parts.push(`Lidarr: ${progress.command_status}`);
-        const failures = result.failures || [];
         if (job.failure_reason) parts.push(job.failure_reason);
-        if (job.status === 'failed' && !failures.length) {
+        if (job.status === 'failed' && !result.failures?.length) {
             parts.push('no per-track reasons recorded (older job)');
         }
         if (result.successful !== undefined) parts.push(`${result.successful} imported`);
@@ -123,13 +123,7 @@ function renderJobs(jobs) {
         if (result.total_tracks) parts.push(`${result.total_tracks} total`);
         if (result.command) parts.push(`command ${result.command}`);
         if (result.blissful_fallback) parts.push(`${result.blissful_fallback} Blissful fallback`);
-        if (failures.length) {
-            parts.push(failures.slice(0, 3).map(f =>
-                `${f.title || 'track'}: ${f.error || 'no reason'}`).join('; '));
-            detail.title = failures.map(f =>
-                `${f.title || 'track'}: ${f.error || 'no reason'}`).join('\n');
-        }
-        detail.textContent = parts.join(' · ').slice(0, 500);
+        detail.textContent = parts.join(' · ').slice(0, 80);
         row.appendChild(detail);
 
         const actions = document.createElement('td');
@@ -150,14 +144,48 @@ function renderJobs(jobs) {
             });
             actions.appendChild(retry);
         }
+        if (job.status !== 'pending' && job.status !== 'running') {
+            const del = document.createElement('button');
+            del.type = 'button';
+            del.className = 'btn btn-secondary';
+            del.textContent = 'Delete';
+            del.addEventListener('click', async () => {
+                try {
+                    const res = await fetch(`/api/jobs/${job.id}`, { method: 'DELETE' });
+                    const data = await res.json();
+                    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+                    loadJobs();
+                } catch (error) {
+                    showNotification(`Delete failed: ${error.message}`, 'error');
+                }
+            });
+            actions.appendChild(del);
+        }
         row.appendChild(actions);
         body.appendChild(row);
     });
     table.appendChild(body);
     list.appendChild(table);
-}
 
-async function loadJobs() {
+    const clear = document.createElement('button');
+    clear.type = 'button';
+    clear.className = 'btn btn-secondary';
+    clear.textContent = 'Clear finished jobs';
+    clear.style.marginTop = '8px';
+    clear.addEventListener('click', async () => {
+        try {
+            const res = await fetch('/api/jobs/clear-finished', { method: 'POST' });
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+            showNotification(`Cleared ${data.removed} jobs`, 'success');
+            loadJobs();
+        } catch (error) {
+            showNotification(`Clear failed: ${error.message}`, 'error');
+        }
+    });
+    list.parentElement.insertBefore(clear, list.nextSibling);
+}
+ {
     try {
         const res = await fetch('/api/jobs?limit=100');
         const data = await res.json();

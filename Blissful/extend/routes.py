@@ -236,6 +236,20 @@ def register_routes(app, config_manager, lidarr_client, download_manager,
             return jsonify({'success': False, 'error': 'Job not found'}), 404
         return jsonify({'success': True, 'job': job, 'restarted': changed})
 
+    @app.route('/api/jobs/<job_id>', methods=['DELETE'])
+    def delete_job(job_id):
+        if not job_manager:
+            return jsonify({'success': False, 'error': 'Job queue unavailable'}), 404
+        removed = job_manager.delete_job(job_id)
+        return jsonify({'success': removed, 'removed': removed}), (200 if removed else 404)
+
+    @app.route('/api/jobs/clear-finished', methods=['POST'])
+    def clear_finished_jobs():
+        if not job_manager:
+            return jsonify({'success': False, 'error': 'Job queue unavailable'}), 404
+        removed = job_manager.clear_finished()
+        return jsonify({'success': True, 'removed': removed})
+
     @app.route('/api/lidarr/webhook', methods=['POST'])
     def lidarr_webhook():
         """Accept a Lidarr webhook and enqueue the album it refers to."""
