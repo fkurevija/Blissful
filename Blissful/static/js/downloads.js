@@ -183,6 +183,7 @@ function renderJobs(jobs) {
 let detailsPane = null;
 let detailsTimer = null;
 let detailsJobId = null;
+let detailsPlainText = '';
 
 function escapeHtml(text) {
     if (text == null) return '';
@@ -203,52 +204,80 @@ function renderJobDetails(job) {
     const result = job.result || {};
     const failures = result.failures || [];
     const progress = job.progress || {};
-    const lines = [];
-    lines.push(`<strong>Job:</strong> ${escapeHtml(jobLabel(job))}`);
-    lines.push(`<strong>Status:</strong> ${escapeHtml(job.status)}`);
-    lines.push(`<strong>Source:</strong> ${escapeHtml(job.source || '')}`);
-    lines.push(`<strong>Updated:</strong> ${escapeHtml(job.updated_at || '')}`);
-    if (job.failure_reason) lines.push(`<strong>Failure reason:</strong> ${escapeHtml(job.failure_reason)}`);
-    if (progress.phase) lines.push(`<strong>Phase:</strong> ${escapeHtml(progress.phase)}`);
-    if (progress.album_title) lines.push(`<strong>Album:</strong> ${escapeHtml(progress.album_title)}`);
+    const fields = [];
+    const add = (label, value) => {
+        if (value !== undefined && value !== null && value !== '') {
+            fields.push({ label, text: String(value) });
+        }
+    };
+    add('Job', jobLabel(job));
+    add('Status', job.status);
+    add('Source', job.source || '');
+    add('Updated', job.updated_at || '');
+    add('Failure reason', job.failure_reason || '');
+    add('Phase', progress.phase || '');
+    add('Album', progress.album_title || '');
     if (progress.processed !== undefined && progress.total) {
-        lines.push(`<strong>Progress:</strong> ${progress.processed}/${progress.total}`);
+        add('Progress', `${progress.processed}/${progress.total}`);
     }
     if (progress.current_track && progress.total_tracks) {
-        lines.push(`<strong>Track:</strong> ${progress.current_track}/${progress.total_tracks}`);
+        add('Track', `${progress.current_track}/${progress.total_tracks}`);
     }
-    if (progress.command_status) lines.push(`<strong>Lidarr:</strong> ${escapeHtml(progress.command_status)}`);
-    if (result.successful !== undefined) lines.push(`<strong>Imported:</strong> ${result.successful}`);
-    if (result.failed !== undefined) lines.push(`<strong>Failed:</strong> ${result.failed}`);
-    if (result.total_tracks !== undefined) lines.push(`<strong>Total tracks:</strong> ${result.total_tracks}`);
+    add('Lidarr', progress.command_status || '');
+    if (result.successful !== undefined) add('Imported', result.successful);
+    if (result.failed !== undefined) add('Failed', result.failed);
+    if (result.total_tracks !== undefined) add('Total tracks', result.total_tracks);
+
+    // Build plain-text lines - each line is its own element so a single
+    // line can be selected and copied without grabbing the whole pane.
+    const plain = [];
+    fields.forEach(f => plain.push(`${f.label}: ${f.text}`));
     if (failures.length) {
-        lines.push(`<strong>Per-track failures (${failures.length}):</strong>`);
-        lines.push('<ul style="margin:6px 0 0 1.2em; padding:0">');
+        plain.push(`Per-track failures (${failures.length}):`);
         failures.forEach(f => {
-            const attempts = Array.isArray(f.attempts) ? f.attempts.map(a => escapeHtml(a.source + ': ' + (a.error || a.message))).join('<br>') : '';
-            lines.push(`<li><strong>${escapeHtml(f.title || 'track')}</strong>: ${escapeHtml(f.error || '')}`);
-            if (attempts) lines.push(`<div style="margin-top:2px; font-size:12px; color:var(--muted-foreground)">${attempts}</div>`);
-            lines.push('</li>');
+            const attempts = Array.isArray(f.attempts)
+                ? f.attempts.map(a => `${a.source || ''}: ${a.error || a.message || ''}`)
+                : [];
+            plain.push(`  - ${f.title || 'track'}: ${f.error || ''}`);
+            attempts.forEach(a => plain.push(`      ${a}`));
         });
-        lines.push('</ul>');
     }
     const log = Array.isArray(job.log) ? job.log : [];
-    lines.push('<strong>Live log:</strong>');
-    lines.push('<div class="job-details-log"></div>');
-    const html = lines.join('<br>') || '<em>No details recorded.</em>';
-    body.innerHTML = html;
-    const logEl = body.querySelector('.job-details-log');
-    if (logEl) {
-        logEl.textContent = log.length ? log.join('\n') : '(waiting for log entries…)';
-        logEl.scrollTop = logEl.scrollHeight;
+
+    body.innerHTML = '';
+    if (!plain.length && !log.length) {
+        body.innerHTML = '<em>No details recorded.</em>';
+    } else {
+        plain.forEach(text => {
+            const line = document.createElement('div');
+            line.className = 'job-detail-line';
+            line.textContent = text;
+            body.appendChild(line);
+        });
+        if (log.length) {
+            const head = document.createElement('div');
+            head.className = 'job-detail-line job-detail-heading';
+            head.textContent = 'Live log:';
+            body.appendChild(head);
+            log.forEach(text => {
+                const line = document.createElement('div');
+                line.className = 'job-detail-line job-log-line';
+                line.textContent = text;
+                body.appendChild(line);
+            });
+        }
     }
+    // Keep the full plain text for the Copy button.
+    detailsPlainText = [...plain, ...(log.length ? log : [])].join('\n');
     const live = job.status === 'pending' || job.status === 'running';
     const badge = detailsPane.querySelector('.job-details-live');
     if (badge) badge.style.display = live ? 'inline' : 'none';
 }
-
 async function refreshJobDetails() {
     if (!detailsJobId) return;
+    // Do not wipe a selection the user is copying from the pane.
+    const sel = window.getSelection();
+    if (sel && sel.toString() && detailsPane && detailsPane.contains(sel.anchorNode)) return;
     try {
         const res = await fetch('/api/jobs?limit=500');
         const data = await res.json();
@@ -268,11 +297,19 @@ function showJobDetails(jobId) {
         pane.innerHTML = `
             <div class="job-details-header">
                 <h3>Job details <span class="job-details-live" style="display:none;color:#10b981;font-size:12px">● live</span></h3>
+                <button type="button" class="btn btn-secondary job-details-copy">Copy all</button>
                 <button type="button" class="btn btn-secondary job-details-close">Close</button>
             </div>
             <div class="job-details-body"></div>
         `;
         pane.querySelector('.job-details-close').addEventListener('click', closeJobDetails);
+        pane.querySelector('.job-details-copy').addEventListener('click', async () => {
+            try {
+                await navigator.clipboard.writeText(detailsPlainText);
+                const copy = pane.querySelector('.job-details-copy');
+                if (copy) { copy.textContent = 'Copied'; setTimeout(() => copy.textContent = 'Copy all', 1200); }
+            } catch (e) {}
+        });
         document.getElementById('jobsList').parentElement.appendChild(pane);
         detailsPane = pane;
     }
