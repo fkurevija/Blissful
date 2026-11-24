@@ -648,7 +648,12 @@ class LidarrClient:
             }
 
     def get_queue(self, page: int = 1, page_size: int = 200) -> Dict:
-        """Return one page of the Lidarr queue (default page is only 10)."""
+        """Return one page of Lidarr's Activity Queue (``GET /api/v1/queue``).
+
+        This is the Activity > Queue tab only; History and Wanted/Missing
+        are never used for stale-torrent detection. Lidarr defaults to 10
+        records per page, so callers page explicitly with ``page_size``.
+        """
         try:
             response = requests.get(
                 f"{self.url}/api/v1/queue",
@@ -665,7 +670,11 @@ class LidarrClient:
             return {'records': [], 'totalRecords': 0}
 
     def get_all_queue_records(self, page_size: int = 200) -> List[Dict]:
-        """Read every queue page until all records are collected."""
+        """Read every page of Lidarr's Activity Queue (``/api/v1/queue``).
+
+        The sole feed for Blissful's stale-torrent cleanup. Never reads
+        History, Wanted/Missing, or the download client directly.
+        """
         records: List[Dict] = []
         page = 1
         total = 1

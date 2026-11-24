@@ -8,9 +8,13 @@ it never talks HTTP itself, it only uses the client/managers handed to its
 
 constructor.  It reads the full wanted/missing list, finds stale torrents in
 
-Lidarr's queue, optionally re-searches their albums and removes the queue
+Lidarr's **Activity Queue** (``GET /api/v1/queue`` only -- never History,
 
-items *only after* the missing tracks are confirmed imported.  A JSON state
+Wanted/Missing, or qBittorrent directly), optionally re-searches their albums
+
+and removes the queue items *only after* the missing tracks are confirmed
+
+imported.  A JSON state
 
 file records handled albums/queue items so a stale torrent is never cleaned
 
@@ -834,7 +838,15 @@ class WantedSearchService:
 
     def get_stale(self) -> list:
 
-        """Return projected queue records whose error text looks unhealthy."""
+        """Return unhealthy downloads from Lidarr's Activity Queue only.
+
+        Candidates come exclusively from ``GET /api/v1/queue`` (the
+        Activity > Queue tab), read via ``get_all_queue_records()`` and
+        paginated at 200/page. Blissful never reads Lidarr's History, the
+        Wanted/Missing list, or qBittorrent directly for stale-torrent
+        detection. Every returned record therefore carries the queue
+        identity (``id`` and ``downloadId``) of a tracked download.
+        """
 
         client = self._get_client()
 
@@ -867,6 +879,14 @@ class WantedSearchService:
         for record in queue:
 
             if not isinstance(record, dict):
+
+                continue
+
+            # Only tracked downloads from the Activity Queue are eligible.
+            # Lidarr gives every queue item a numeric id and a downloadId;
+            # anything lacking them is not a live queue download and is
+            # ignored (e.g. a stray/history-style record).
+            if record.get('id') is None or not record.get('downloadId'):
 
                 continue
 

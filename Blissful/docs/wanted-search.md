@@ -44,10 +44,18 @@ run is active (including runs started by the scheduler or another tab).
 
 ## Stale torrents
 
-Stale records come from the paginated Lidarr Activity Queue. Items whose status
-text mentions stalled connections, no eligible files, communication/download
-client problems, metadata downloading or generic stalls are listed with
-checkboxes.
+> **Source of truth:** Blissful only ever picks up stale torrents from
+> Lidarr's **Activity → Queue** (`GET /api/v1/queue`, paginated 200/page).
+> It does **not** read Lidarr's History, the Wanted/Missing list, or
+> qBittorrent directly for stale-torrent detection. Only records that are
+> live queue downloads (they carry Lidarr's queue `id` and `downloadId`)
+> are considered; a record must also have status text mentioning stalled
+> connections, no eligible files, communication/download client problems,
+> metadata downloading or a generic stall. Each eligible download appears
+> once, deduplicated by `downloadId`.
+
+Items whose status text matches one of those unhealthy patterns are listed
+with checkboxes.
 
 With *Apply* checked, for each selected stale item Blissful:
 

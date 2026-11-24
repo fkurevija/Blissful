@@ -758,6 +758,35 @@ def test_stale_cleanup_deletes_only_after_import(tmp_path, monkeypatch):
     assert any('already recorded' in str(s) for s in again['skipped'])
 
 
+def test_get_stale_only_uses_activity_queue_records(tmp_path):
+    """Stale detection must ignore anything that is not a live queue download.
+
+    Every candidate comes from GET /api/v1/queue and must carry Lidarr's
+    queue id and downloadId; history-style records are excluded.
+    """
+    class Client:
+        def get_all_queue_records(self, page_size=200):
+            return [
+                # genuine activity-queue download (unhealthy)
+                {'id': 11, 'albumId': 10, 'downloadId': 'd1',
+                 'title': 'Stalled',
+                 'errorMessage': 'The download is stalled with no connections'},
+                # history-style record: no queue id / downloadId -> ignored
+                {'albumId': 99, 'title': 'Old history item',
+                 'errorMessage': 'The download is stalled with no connections'},
+                # another queue item missing downloadId -> ignored
+                {'id': 12, 'albumId': 88,
+                 'errorMessage': 'The download is stalled with no connections'},
+                # healthy queue item -> not unhealthy
+                {'id': 13, 'albumId': 77, 'downloadId': 'd3',
+                 'title': 'Healthy', 'errorMessage': ''},
+            ]
+
+    svc = _wanted_service(tmp_path, client=Client())
+    stale = svc.get_stale()
+    assert [record['id'] for record in stale] == [11]
+    assert all(record.get('downloadId') for record in stale)
+
 def test_cli_json_only_emits_pure_json():
     import os
     import subprocess

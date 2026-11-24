@@ -1,10 +1,12 @@
 # 🔁 Retry Failed Imports (native)
 
 Blissful can recover Lidarr's unhealthy/failed imports without the old external
-bridge script. It reads Lidarr's paginated queue, downloads only the missing
-tracks that Lidarr can actually link, verifies duration and tags, and creates a
-`ManualImport` command. The feature is built into the image — no mounted script
-or direct access to Lidarr's SQLite database is needed.
+bridge script. It reads Lidarr's paginated **Activity Queue**
+(`GET /api/v1/queue`) as its only candidate feed — never History,
+Wanted/Missing, or qBittorrent directly — downloads only the missing tracks
+that Lidarr can actually link, verifies duration and tags, and creates a
+`ManualImport` command. The feature is built into the image — no mounted
+script or direct access to Lidarr's SQLite database is needed.
 
 ## Safety defaults
 
