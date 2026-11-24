@@ -228,47 +228,68 @@ function renderJobDetails(job) {
     if (result.failed !== undefined) add('Failed', result.failed);
     if (result.total_tracks !== undefined) add('Total tracks', result.total_tracks);
 
-    // Build plain-text lines - each line is its own element so a single
-    // line can be selected and copied without grabbing the whole pane.
-    const plain = [];
-    fields.forEach(f => plain.push(`${f.label}: ${f.text}`));
-    if (failures.length) {
-        plain.push(`Per-track failures (${failures.length}):`);
-        failures.forEach(f => {
-            const attempts = Array.isArray(f.attempts)
-                ? f.attempts.map(a => `${a.source || ''}: ${a.error || a.message || ''}`)
-                : [];
-            plain.push(`  - ${f.title || 'track'}: ${f.error || ''}`);
-            attempts.forEach(a => plain.push(`      ${a}`));
-        });
-    }
+    // Original structure: job info at the top as bold-label lines, then
+    // a separate fixed-size scrollable log pane below it.
     const log = Array.isArray(job.log) ? job.log : [];
 
     body.innerHTML = '';
-    if (!plain.length && !log.length) {
+    if (!fields.length && !log.length) {
         body.innerHTML = '<em>No details recorded.</em>';
     } else {
-        plain.forEach(text => {
+        fields.forEach(f => {
             const line = document.createElement('div');
             line.className = 'job-detail-line';
-            line.textContent = text;
+            line.innerHTML = `<strong>${escapeHtml(f.label)}:</strong> ${escapeHtml(f.text)}`;
             body.appendChild(line);
         });
-        if (log.length) {
+        if (result.failures && result.failures.length) {
             const head = document.createElement('div');
             head.className = 'job-detail-line job-detail-heading';
-            head.textContent = 'Live log:';
+            head.textContent = `Per-track failures (${result.failures.length}):`;
             body.appendChild(head);
-            log.forEach(text => {
+            result.failures.forEach(f => {
+                const attempts = Array.isArray(f.attempts)
+                    ? f.attempts.map(a => `${a.source || ''}: ${a.error || a.message || ''}`)
+                    : [];
                 const line = document.createElement('div');
-                line.className = 'job-detail-line job-log-line';
-                line.textContent = text;
+                line.className = 'job-detail-line';
+                line.textContent = `  - ${f.title || 'track'}: ${f.error || ''}`;
                 body.appendChild(line);
+                attempts.forEach(a => {
+                    const al = document.createElement('div');
+                    al.className = 'job-detail-line';
+                    al.textContent = `      ${a}`;
+                    body.appendChild(al);
+                });
             });
         }
     }
-    // Keep the full plain text for the Copy button.
-    detailsPlainText = [...plain, ...(log.length ? log : [])].join('\n');
+    // The log lives in its own HTML pane with a fixed height; the
+    // scrollbar grows as lines are appended.
+    let logPane = detailsPane.querySelector('.job-details-log');
+    if (!logPane) {
+        logPane = document.createElement('div');
+        logPane.className = 'job-details-log';
+        const label = document.createElement('div');
+        label.className = 'job-detail-heading';
+        label.textContent = 'Live log:';
+        detailsPane.insertBefore(label, detailsPane.querySelector('.job-details-footer'));
+        detailsPane.insertBefore(logPane, detailsPane.querySelector('.job-details-footer'));
+    }
+    logPane.innerHTML = '';
+    if (log.length) {
+        log.forEach(text => {
+            const line = document.createElement('div');
+            line.className = 'job-log-line';
+            line.textContent = text;
+            logPane.appendChild(line);
+        });
+    } else {
+        logPane.textContent = '(waiting for log entries…)';
+    }
+    logPane.scrollTop = logPane.scrollHeight;
+    // Keep the plain log text for the Copy logs button.
+    detailsPlainText = log.length ? log.join('\n') : '';
     const live = job.status === 'pending' || job.status === 'running';
     const badge = detailsPane.querySelector('.job-details-live');
     if (badge) badge.style.display = live ? 'inline' : 'none';
@@ -297,17 +318,19 @@ function showJobDetails(jobId) {
         pane.innerHTML = `
             <div class="job-details-header">
                 <h3>Job details <span class="job-details-live" style="display:none;color:#10b981;font-size:12px">● live</span></h3>
-                <button type="button" class="btn btn-secondary job-details-copy">Copy all</button>
                 <button type="button" class="btn btn-secondary job-details-close">Close</button>
             </div>
             <div class="job-details-body"></div>
+            <div class="job-details-footer">
+                <button type="button" class="btn btn-secondary job-details-copy">Copy logs</button>
+            </div>
         `;
         pane.querySelector('.job-details-close').addEventListener('click', closeJobDetails);
         pane.querySelector('.job-details-copy').addEventListener('click', async () => {
             try {
                 await navigator.clipboard.writeText(detailsPlainText);
                 const copy = pane.querySelector('.job-details-copy');
-                if (copy) { copy.textContent = 'Copied'; setTimeout(() => copy.textContent = 'Copy all', 1200); }
+                if (copy) { copy.textContent = 'Copied'; setTimeout(() => copy.textContent = 'Copy logs', 1200); }
             } catch (e) {}
         });
         document.getElementById('jobsList').parentElement.appendChild(pane);
@@ -317,7 +340,7 @@ function showJobDetails(jobId) {
     renderJobDetails(currentJobs.find(j => j.id === jobId) || { id: jobId, status: 'pending' });
     if (detailsTimer) clearInterval(detailsTimer);
     detailsTimer = setInterval(refreshJobDetails, 1500);
-    detailsPane.style.display = 'block';
+    detailsPane.style.display = 'flex';
 }
 
 async function loadJobs() {
