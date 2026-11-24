@@ -1194,8 +1194,8 @@ def test_child_jobs_hidden_and_log_mirrored_to_parent(tmp_path):
     manager.append_log(child['id'], 'child phase', artist='A')
     manager.update_job(child['id'], progress={'phase': 'downloaded'})
     parent_log = manager.get_job(parent['id'])['log']
-    assert any('child phase' in line for line in parent_log)
-    assert any('downloaded' in line for line in parent_log)
+    assert any(isinstance(line, dict) and line.get('phase') == 'child phase' for line in parent_log)
+    assert any(isinstance(line, dict) and line.get('phase') == 'downloaded' for line in parent_log)
 
 
 def test_job_log_entry_is_pretty_printed(tmp_path):
@@ -1223,14 +1223,14 @@ def test_job_log_entry_is_pretty_printed(tmp_path):
              'reason': 'Duration mismatch'},
         ]})
     entry = manager.get_job(job['id'])['log'][0]
-    lines = entry.split('\n')
-    assert lines[0].startswith('timestamp')
-    assert any('phase' in l for l in lines)
-    assert any('album_title' in l for l in lines)
-    assert any(l.strip() == 'attempts:' for l in lines)
-    assert any('1. source:' in l for l in lines)
-    assert any('   status: failed' in l for l in lines)
-    assert any('   reason: Duration mismatch' in l for l in lines)
+    assert isinstance(entry, dict)
+    assert entry['phase'] == 'download job running'
+    assert entry['album_title'] == 'Secrets of the Magick Grimoire'
+    assert entry['download_track'] == 'Swallowtail (demo)'
+    assert entry['download_status'] == 'trying'
+    assert len(entry['attempts']) == 2
+    assert entry['attempts'][1]['reason'] == 'Duration mismatch'
+    assert JobManager._provider_label(entry['attempts'][0]['source']) == 'YouTube'
 
 
 def test_job_log_is_verbose_and_deduplicates_polls(tmp_path):
@@ -1252,11 +1252,11 @@ def test_job_log_is_verbose_and_deduplicates_polls(tmp_path):
         'failure_reason': 'Duration mismatch'})
     log = manager.get_job(job['id'])['log']
     assert len(log) == 1
-    joined = log[0]
-    assert 'download_source = ytsearch1:artist - track' in joined
-    assert 'download_status = trying' in joined
-    assert 'attempts:' in joined and '1. 1' in joined
-    assert 'failure_reason  = Duration mismatch' in joined or 'failure_reason = Duration mismatch' in joined
+    entry = log[0]
+    assert entry['download_source'] == 'ytsearch1:artist - track'
+    assert entry['download_status'] == 'trying'
+    assert entry['failure_reason'] == 'Duration mismatch'
+    assert entry['attempts'] == [1, 2]
     # Identical consecutive poll lines are skipped.
     manager.update_job(job['id'], progress={
         'phase': 'trying source', 'download_source': 'ytsearch1:artist - track',
@@ -1285,9 +1285,9 @@ def test_job_records_live_log_on_progress(tmp_path):
     stored = manager.get_job(job['id'])
     log = stored['log']
     assert len(log) >= 3
-    assert any('status: running' in line for line in log)
-    assert any('searching' in line for line in log)
-    assert any('manual entry' in line and 'verified' in line for line in log)
+    assert any(isinstance(line, dict) and (line.get('status') == 'running' or line.get('phase') == 'status: running') for line in log)
+    assert any(isinstance(line, dict) and line.get('phase') == 'searching' for line in log)
+    assert any(isinstance(line, dict) and line.get('phase') == 'manual entry' and line.get('verified') == 3 for line in log)
     assert stored['progress']['phase'] == 'searching'
 
 

@@ -279,14 +279,142 @@ function renderJobDetails(job) {
     const wasAtBottom = !logPane.dataset.init ||
         (logPane.scrollHeight - logPane.scrollTop - logPane.clientHeight) < 24;
     logPane.innerHTML = '';
-    if (log.length) {
-        log.forEach(text => {
-            const entry = document.createElement('div');
-            entry.className = 'job-log-entry';
-            entry.textContent = text;
-            logPane.appendChild(entry);
+    const chip = text => {
+        const span = document.createElement('span');
+        span.className = 'log-chip';
+        span.textContent = String(text);
+        return span;
+    };
+    const bullet = content => {
+        const row = document.createElement('div');
+        row.className = 'log-bullet';
+        const mark = document.createElement('span');
+        mark.className = 'log-bullet-mark';
+        mark.textContent = '○';
+        const body = document.createElement('span');
+        body.className = 'log-bullet-body';
+        body.appendChild(content);
+        row.appendChild(mark);
+        row.appendChild(body);
+        return row;
+    };
+    const textRow = text => {
+        const span = document.createElement('span');
+        span.textContent = text;
+        return span;
+    };
+    const meta = (parts) => {
+        const frag = document.createDocumentFragment();
+        frag.appendChild(textRow(' ('));
+        parts.forEach((part, i) => {
+            if (i) frag.appendChild(textRow(' , '));
+            if (typeof part === 'string') {
+                frag.appendChild(chip(part));
+            } else {
+                frag.appendChild(textRow(part.text || ''));
+            }
         });
-    } else {
+        frag.appendChild(textRow(' )'));
+        return frag;
+    };
+    const provider = source => {
+        const s = String(source || '').toLowerCase();
+        if (s.includes('site:music.youtube.com')) return 'YouTube Music';
+        if (s.startsWith('ytsearch') || s.includes('youtube')) return 'YouTube';
+        if (s.startsWith('scsearch') || s.includes('soundcloud')) return 'SoundCloud';
+        if (s.startsWith('bandcamp') || s.includes('bandcamp')) return 'Bandcamp';
+        if (s.startsWith('dzsearch') || s.includes('deezer')) return 'Deezer';
+        if (s.includes('apple')) return 'Apple Music';
+        if (s.includes('mixcloud')) return 'Mixcloud';
+        if (s.includes('archive.org')) return 'Archive.org';
+        if (s.includes('tidal')) return 'Tidal';
+        return 'Source';
+    };
+    log.forEach(item => {
+        const entry = document.createElement('div');
+        entry.className = 'job-log-entry';
+        if (typeof item !== 'object' || item === null) {
+            entry.textContent = String(item);
+            logPane.appendChild(entry);
+            return;
+        }
+        const header = document.createElement('div');
+        header.className = 'log-snapshot-title';
+        header.appendChild(textRow('Job Snapshot '));
+        header.appendChild(chip(item.ts || ''));
+        entry.appendChild(header);
+
+        // Phase / Status with parenthetical status metadata.
+        const statusParts = [];
+        if (item.job_status) statusParts.push('job_status=' + item.job_status);
+        if (item.download_status) statusParts.push('download_status=' + item.download_status);
+        if (item.download_pending !== undefined) statusParts.push('download_pending=' + item.download_pending);
+        if (statusParts.length) {
+            const frag = document.createDocumentFragment();
+            frag.appendChild(textRow('Phase / Status: '));
+            frag.appendChild(textRow(String(item.phase || '')));
+            frag.appendChild(meta(statusParts));
+            entry.appendChild(bullet(frag));
+        }
+        if (item.download_artist) {
+            const frag = document.createDocumentFragment();
+            frag.appendChild(textRow('Artist: '));
+            frag.appendChild(textRow(String(item.download_artist)));
+            entry.appendChild(bullet(frag));
+        }
+        if (item.album_title) {
+            const frag = document.createDocumentFragment();
+            frag.appendChild(textRow('Album: '));
+            frag.appendChild(textRow(String(item.album_title)));
+            const albumParts = [];
+            if (item.album_id !== undefined) albumParts.push('album_id=' + item.album_id);
+            if (item.album_index !== undefined) {
+                const total = item.total_albums !== undefined ? item.total_albums : '?';
+                albumParts.push({ text: 'album_index=' + item.album_index + ' of ' + total });
+            }
+            if (albumParts.length) frag.appendChild(meta(albumParts));
+            entry.appendChild(bullet(frag));
+        }
+        if (item.download_track) {
+            const frag = document.createDocumentFragment();
+            frag.appendChild(textRow('Track: '));
+            frag.appendChild(textRow(String(item.download_track)));
+            const trackParts = [];
+            if (item.current_track !== undefined) {
+                const total = item.total_tracks !== undefined ? item.total_tracks : '?';
+                trackParts.push({ text: 'current_track=' + item.current_track + ' of ' + total });
+            }
+            if (trackParts.length) frag.appendChild(meta(trackParts));
+            entry.appendChild(bullet(frag));
+        }
+        if (item.download_source) {
+            const frag = document.createDocumentFragment();
+            frag.appendChild(textRow('Current Source:'));
+            frag.appendChild(document.createElement('br'));
+            frag.appendChild(chip(item.download_source));
+            entry.appendChild(bullet(frag));
+        }
+        const attempts = Array.isArray(item.attempts) ? item.attempts : [];
+        if (attempts.length) {
+            const heading = document.createElement('div');
+            heading.className = 'log-section-title';
+            heading.textContent = 'Download Attempts';
+            entry.appendChild(heading);
+            attempts.forEach(attempt => {
+                const frag = document.createDocumentFragment();
+                const src = attempt.source || '';
+                frag.appendChild(textRow(provider(src) + ' ('));
+                frag.appendChild(chip(src));
+                frag.appendChild(textRow('): '));
+                frag.appendChild(textRow(String(attempt.status || '')));
+                frag.appendChild(textRow(' — '));
+                frag.appendChild(textRow(String(attempt.reason || attempt.error || '')));
+                entry.appendChild(bullet(frag));
+            });
+        }
+        logPane.appendChild(entry);
+    });
+    if (!log.length) {
         logPane.textContent = '(waiting for log entries…)';
     }
     logPane.dataset.init = '1';
@@ -295,7 +423,44 @@ function renderJobDetails(job) {
     // their scroll position alone until they scroll back down.
     if (wasAtBottom) logPane.scrollTop = logPane.scrollHeight;
     // Keep the plain log text for the Copy logs button.
-    detailsPlainText = log.length ? log.join('\n') : '';
+    detailsPlainText = log.map(item => {
+        if (typeof item !== 'object' || item === null) return String(item);
+        const lines = [`Job Snapshot ( ${item.ts || ''} )`];
+        const status = [];
+        if (item.job_status) status.push('job_status=' + item.job_status);
+        if (item.download_status) status.push('download_status=' + item.download_status);
+        if (item.download_pending !== undefined) status.push('download_pending=' + item.download_pending);
+        lines.push(`○ Phase / Status: ${item.phase || ''}${status.length ? ' ( ' + status.join(' , ') + ' )' : ''}`);
+        if (item.download_artist) lines.push(`○ Artist: ${item.download_artist}`);
+        if (item.album_title) {
+            let line = `○ Album: ${item.album_title}`;
+            if (item.album_id !== undefined) line += ` ( album_id=${item.album_id}`;
+            if (item.album_index !== undefined) line += ` , album_index=${item.album_index} of ${item.total_albums}`;
+            if (item.album_id !== undefined) line += ' )';
+            lines.push(line);
+        }
+        if (item.download_track) {
+            let line = `○ Track: ${item.download_track}`;
+            if (item.current_track !== undefined) line += ` ( current_track=${item.current_track} of ${item.total_tracks} )`;
+            lines.push(line);
+        }
+        if (item.download_source) lines.push(`○ Current Source:\n    ${item.download_source}`);
+        const attempts = Array.isArray(item.attempts) ? item.attempts : [];
+        if (attempts.length) {
+            lines.push('', 'Download Attempts', '');
+            attempts.forEach(a => {
+                const src = a.source || '';
+                const s = src.toLowerCase();
+                let label = 'Source';
+                if (s.includes('site:music.youtube.com')) label = 'YouTube Music';
+                else if (s.startsWith('ytsearch') || s.includes('youtube')) label = 'YouTube';
+                else if (s.startsWith('scsearch') || s.includes('soundcloud')) label = 'SoundCloud';
+                else if (s.startsWith('bandcamp') || s.includes('bandcamp')) label = 'Bandcamp';
+                lines.push(`○ ${label} ( ${src} ): ${a.status || ''} — ${a.reason || a.error || ''}`);
+            });
+        }
+        return lines.join('\n');
+    }).join('\n\n');
     const live = job.status === 'pending' || job.status === 'running';
     const badge = detailsPane.querySelector('.job-details-live');
     if (badge) badge.style.display = live ? 'inline' : 'none';

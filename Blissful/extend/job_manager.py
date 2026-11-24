@@ -223,66 +223,45 @@ class JobManager:
             self._thread.join(timeout=5)
 
     @staticmethod
-    def _log_value(value):
-        """Compact, readable rendering of a scalar detail value."""
-        if value is None:
-            return ''
-        text = str(value)
-        return text[:400] if len(text) > 400 else text
+    def _provider_label(source):
+        """Human provider name for a yt-dlp source string."""
+        text = str(source or '').lower()
+        if 'site:music.youtube.com' in text:
+            return 'YouTube Music'
+        if text.startswith('ytsearch') or 'youtube' in text:
+            return 'YouTube'
+        if text.startswith('scsearch') or 'soundcloud' in text:
+            return 'SoundCloud'
+        if text.startswith('bandcamp') or 'bandcamp' in text:
+            return 'Bandcamp'
+        if text.startswith('dzsearch') or 'deezer' in text:
+            return 'Deezer'
+        if 'apple' in text:
+            return 'Apple Music'
+        if 'mixcloud' in text:
+            return 'Mixcloud'
+        if 'archive.org' in text:
+            return 'Archive.org'
+        if 'tidal' in text:
+            return 'Tidal'
+        return 'Source'
 
     @staticmethod
     def _log_line(message, **details):
-        """Format one timestamped, pretty-printed job log entry.
+        """Build one structured job log entry for the UI snapshot view.
 
-        Returns a multi-line block with aligned ``key = value`` fields and
-        an expanded, numbered ``attempts:`` section. Every detail field is
-        included (nothing silently dropped). The UI renders each entry in
-        its own box with spacing so long logs stay readable.
+        Returns a dict with the timestamp, phase message and every detail
+        field. The UI renders it as a grouped "Job Snapshot" with a
+        Download Attempts section; nothing is silently dropped.
         """
-        fields = {}
-        for key, value in details.items():
-            if value is None or value == '' or key == 'phase':
-                continue
-            if key in ('attempts', 'failures') and isinstance(value, (list, tuple)):
-                continue  # expanded as a numbered section below
-            if key == 'phase':
-                continue
-            fields[key] = JobManager._log_value(value)
-        # The phase message doubles as the first field, matching the UI.
+        entry = {'ts': datetime.now().strftime('%H:%M:%S')}
         if message and message != 'progress':
-            fields.setdefault('phase', JobManager._log_value(message))
-        fields.setdefault('timestamp', datetime.now().strftime('%H:%M:%S'))
-        ordered = [
-            'timestamp', 'phase', 'album_title', 'album_index', 'total_albums',
-            'current_track', 'total_tracks', 'processed', 'total', 'verified',
-            'job_status', 'command_status', 'album_id', 'download_track',
-            'download_artist', 'download_source', 'download_status',
-            'download_pending', 'source', 'status', 'imported', 'deleted',
-            'kept', 'pending', 'failure_reason', 'reason',
-        ]
-        keys = [k for k in ordered if k in fields]
-        keys += sorted(k for k in fields if k not in ordered)
-        width = max((len(k) for k in keys), default=0)
-        lines = ['%s = %s' % (k.ljust(width), fields[k]) for k in keys]
-        for section in ('attempts', 'failures'):
-            values = details.get(section)
-            if not isinstance(values, (list, tuple)) or not values:
+            entry['phase'] = message
+        for key, value in details.items():
+            if key == 'phase' or value is None or value == '':
                 continue
-            lines.append('')
-            lines.append('%s:' % section)
-            for index, item in enumerate(values, 1):
-                if isinstance(item, dict):
-                    first = True
-                    for field in ('source', 'status', 'reason', 'error', 'title'):
-                        val = item.get(field)
-                        if val in (None, ''):
-                            continue
-                        prefix = '%d. ' % index if first else '   '
-                        lines.append('%s%s: %s' % (prefix, field, JobManager._log_value(val)))
-                        first = False
-                else:
-                    lines.append('%d. %s' % (index, JobManager._log_value(item)))
-        return '\n'.join(lines)
+            entry[key] = value
+        return entry
 
     def _append_log_locked(self, job, message, **details):
         """Append a log line to a job and mirror it to its parent run.
@@ -290,23 +269,24 @@ class JobManager:
         Consecutive identical lines (ignoring the timestamp) are skipped
         so a 2-second poll does not fill the log with duplicates.
         """
-        line = self._log_line(message, **details)
+        entry = self._log_line(message, **details)
         log = job.setdefault('log', [])
-        # Ignore the timestamp line when comparing consecutive entries so
-        # a repeating 2-second poll is not appended again and again.
-        def body_of(text):
-            parts = text.split('\n', 1)
-            return parts[1] if len(parts) > 1 else text
-        if log and body_of(log[-1]) == body_of(line):
+        # Ignore the timestamp when comparing consecutive entries so a
+        # repeating 2-second poll is not appended again and again.
+        def body_of(item):
+            if isinstance(item, dict):
+                return {k: v for k, v in item.items() if k != 'ts'}
+            return item
+        if log and body_of(log[-1]) == body_of(entry):
             return
-        log.append(line)
+        log.append(entry)
         del log[:-200]
         parent_id = job.get('parent_id')
         if parent_id:
             for parent in self.jobs:
                 if parent['id'] == parent_id:
                     plog = parent.setdefault('log', [])
-                    plog.append(line)
+                    plog.append(entry)
                     del plog[:-200]
                     parent['updated_at'] = _now()
                     break
