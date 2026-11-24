@@ -409,6 +409,13 @@ def register_routes(app, config_manager, lidarr_client, download_manager,
             return jsonify(result), 409
         return jsonify(result)
 
+    @app.route('/api/wanted/cancel', methods=['POST'])
+    def cancel_wanted_run():
+        if not wanted_search:
+            return jsonify({'success': False, 'error': 'Wanted search unavailable'}), 404
+        cancelled = wanted_search.cancel_active()
+        return jsonify({'success': True, 'cancelled': bool(cancelled)})
+
     @app.route('/api/wanted/status', methods=['GET'])
     def wanted_status():
         config = config_manager.get_config()

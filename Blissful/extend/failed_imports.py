@@ -64,7 +64,10 @@ _REQUIRED_TAGS = {
 _JOB_TIMEOUT_S = 360          # ~6 minutes, as specified
 _COMMAND_TIMEOUT_S = 180
 _POLL_INTERVAL_S = 2
-_JOB_TERMINAL = {'succeeded', 'failed', 'complete', 'completed', 'error'}
+# 'cancelled' is terminal: a user-cancelled (or deleted) download job must
+# never leave cleanup polling until the 15-minute timeout.
+_JOB_TERMINAL = {'succeeded', 'failed', 'complete', 'completed', 'error',
+                'cancelled', 'canceled'}
 _COMMAND_TERMINAL = {'completed', 'failed', 'complete', 'error'}
 
 _DEFAULT_STANDARD_FORMAT = '{track:00} - {title}'
@@ -429,9 +432,13 @@ class FailedImportsRetry:
         last = {}
         while time.monotonic() < deadline:
             try:
-                last = self.job_manager.get_job(job_id) or {}
+                last = self.job_manager.get_job(job_id)
             except Exception as exc:
                 return {'status': 'failed', 'failure_reason': str(exc)}
+            if not last:
+                # Job was deleted from history while this run was polling it.
+                return {'status': 'cancelled',
+                        'failure_reason': 'download job was removed'}
             status = _lower(last.get('status'))
             if progress:
                 try:

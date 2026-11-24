@@ -214,6 +214,10 @@ class WantedSearchService:
 
         self._run_lock = threading.Lock()
 
+        # Set by cancel_active() to stop an in-flight search/cleanup run.
+
+        self._cancel_event = threading.Event()
+
 
 
     # ------------------------------------------------------------ gap fill
@@ -294,6 +298,8 @@ class WantedSearchService:
 
             return self._busy_report()
 
+        self._cancel_event.clear()
+
         self._set_active(kind='search', phase='preparing', started_at=time.time(),
 
                          apply=bool(apply))
@@ -306,7 +312,9 @@ class WantedSearchService:
 
             if self.get_active() is not None:
 
-                self._finish_active('completed')
+                status = 'cancelled' if self._cancel_event.is_set() else 'completed'
+
+                self._finish_active(status)
 
             self._run_lock.release()
 
@@ -319,6 +327,8 @@ class WantedSearchService:
         if not self._run_lock.acquire(blocking=False):
 
             return self._busy_report()
+
+        self._cancel_event.clear()
 
         self._set_active(kind='cleanup', phase='starting', started_at=time.time(),
 
@@ -334,13 +344,63 @@ class WantedSearchService:
 
             if self.get_active() is not None:
 
-                self._finish_active('failed')
+                status = 'cancelled' if self._cancel_event.is_set() else 'failed'
+
+                self._finish_active(status)
 
             self._run_lock.release()
 
 
 
     # ------------------------------------------------------------- progress
+
+    def cancel_active(self):
+
+        """Request cancellation of the in-flight run and cancel its job.
+
+
+
+        Loops poll ``_cancel_event`` at album boundaries; the inner
+
+        download job is cancelled too so ``_poll_job`` returns promptly
+
+        instead of waiting for its timeout. Returns True when a run was
+
+        actually in flight.
+
+        """
+
+        active = self.get_active()
+
+        was_running = bool(active) or self._run_lock.locked()
+
+        self._cancel_event.set()
+
+        # Cancel the run's pending/running download job so the poll loop
+
+        # unblocks immediately rather than at timeout.
+
+        if self.job_manager is not None:
+
+            try:
+
+                for job in self.job_manager.list_jobs(limit=200):
+
+                    if job.get('status') in ('pending', 'running'):
+
+                        self.job_manager.cancel_job(job['id'])
+
+            except Exception:
+
+                pass
+
+        if active is not None:
+
+            self._set_active(phase='cancelling', cancel_requested=True)
+
+        return bool(was_running)
+
+
 
     def get_active(self):
 
@@ -1171,6 +1231,12 @@ class WantedSearchService:
 
             for index, item in enumerate(wanted, 1):
 
+                if self._cancel_event.is_set():
+
+                    report['cancelled'] = True
+
+                    break
+
                 aid = item.get('albumId')
 
                 if not aid:
@@ -1281,6 +1347,10 @@ class WantedSearchService:
 
         while time.monotonic() < deadline:
 
+            if self._cancel_event.is_set():
+
+                return {'status': 'cancelled', 'message': 'cancelled by user'}
+
             try:
 
                 last = client.get_command(command_id) or {}
@@ -1326,6 +1396,10 @@ class WantedSearchService:
         last_error = ''
 
         while time.monotonic() < deadline:
+
+            if self._cancel_event.is_set():
+
+                return False, 'cancelled by user'
 
             try:
 
@@ -1573,6 +1647,12 @@ class WantedSearchService:
 
 
         for album_id, records in by_album.items():
+
+            if self._cancel_event.is_set():
+
+                report['cancelled'] = True
+
+                break
 
             title = next((str(record.get('title') or '') for record in records
 

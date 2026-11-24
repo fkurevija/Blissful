@@ -1091,6 +1091,63 @@ def test_wanted_search_creates_downloads_job(tmp_path):
     assert jobs.record['result']['blissful_fallback'] == 1
 
 
+def test_cancel_active_stops_run_and_job(tmp_path):
+    from extend.wanted_search import WantedSearchService
+
+    class Config:
+        def get_config(self):
+            return {'wanted_search_enabled': True}
+
+    class Jobs:
+        def __init__(self):
+            self.items = [{'id': 'j', 'status': 'running'}]
+
+        def list_jobs(self, limit=100):
+            return list(self.items)
+
+        def cancel_job(self, jid):
+            for job in self.items:
+                if job['id'] == jid:
+                    job['status'] = 'cancelled'
+                    return True
+            return False
+
+    jobs = Jobs()
+    svc = WantedSearchService(Config(), object(),
+                              str(tmp_path / 'state.json'), job_manager=jobs)
+    svc._set_active(kind='cleanup', phase='searching')
+    assert svc.cancel_active() is True
+    assert svc._cancel_event.is_set()
+    assert jobs.items[0]['status'] == 'cancelled'
+    assert svc.get_active()['cancel_requested'] is True
+
+
+def test_poll_job_stops_on_cancelled_or_missing_job(monkeypatch):
+    import extend.failed_imports as failed_mod
+    from extend.failed_imports import FailedImportsRetry
+
+    monkeypatch.setattr(failed_mod.time, 'sleep', lambda *a, **k: None)
+
+    class Config:
+        def get_config(self):
+            return {'gapfill_job_timeout_minutes': 15}
+
+    class Jobs:
+        def __init__(self, result):
+            self.result = result
+
+        def get_job(self, jid):
+            return self.result
+
+    svc = FailedImportsRetry(Config(), object(), None, None,
+                             Jobs({'status': 'cancelled'}))
+    assert svc._poll_job('j', timeout_s=5)['status'] == 'cancelled'
+
+    # A deleted job (get_job -> None) must also stop, not poll to timeout.
+    svc = FailedImportsRetry(Config(), object(), None, None, Jobs(None))
+    assert svc._poll_job('j', timeout_s=5)['status'] == 'cancelled'
+
+
 def test_failed_job_records_per_track_rejection_reason(tmp_path):
     from extend.job_manager import JobManager
 

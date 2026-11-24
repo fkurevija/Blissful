@@ -153,6 +153,8 @@ function renderJobs(jobs) {
                     const res = await fetch(`/api/jobs/${job.id}/cancel`, { method: 'POST' });
                     const data = await res.json();
                     if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+                    // Cancelling an in-flight job must stop the run that owns it.
+                    try { fetch('/api/wanted/cancel', { method: 'POST', body: '{}' }); } catch (e) {}
                     loadJobs();
                 } catch (error) {
                     showNotification(`Cancel failed: ${error.message}`, 'error');
