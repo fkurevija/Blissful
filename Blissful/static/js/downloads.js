@@ -114,6 +114,9 @@ function renderJobs(jobs) {
         }
         if (progress.command_status) parts.push(`Lidarr: ${progress.command_status}`);
         if (job.failure_reason) parts.push(job.failure_reason);
+        if (job.status === 'failed' && !failures.length) {
+            parts.push('no per-track reasons recorded (older job)');
+        }
         if (result.successful !== undefined) parts.push(`${result.successful} imported`);
         if (result.failed) parts.push(`${result.failed} failed`);
         if (result.total_tracks) parts.push(`${result.total_tracks} total`);
