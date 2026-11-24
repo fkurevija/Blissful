@@ -119,7 +119,14 @@ function renderJobs(jobs) {
         if (result.total_tracks) parts.push(`${result.total_tracks} total`);
         if (result.command) parts.push(`command ${result.command}`);
         if (result.blissful_fallback) parts.push(`${result.blissful_fallback} Blissful fallback`);
-        detail.textContent = parts.join(' · ');
+        const failures = result.failures || [];
+        if (failures.length) {
+            parts.push(failures.slice(0, 3).map(f =>
+                `${f.title || 'track'}: ${f.error || 'no reason'}`).join('; '));
+            detail.title = failures.map(f =>
+                `${f.title || 'track'}: ${f.error || 'no reason'}`).join('\n');
+        }
+        detail.textContent = parts.join(' · ').slice(0, 500);
         row.appendChild(detail);
 
         const actions = document.createElement('td');

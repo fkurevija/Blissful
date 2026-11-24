@@ -214,7 +214,21 @@ class JobManager:
             else:
                 result = {'success': False, 'error': f"Unknown job type: {job.get('kind')}"}
             status = 'succeeded' if result.get('success') else 'failed'
-            reason = None if result.get('success') else result.get('error', 'Download failed')
+            failures = [{
+                'title': track.get('title'),
+                'error': track.get('error'),
+                'attempts': track.get('attempts') or [],
+            } for track in (result.get('tracks') or [])
+                if isinstance(track, dict) and not track.get('success')
+                and (track.get('error') or track.get('attempts'))]
+            if result.get('success'):
+                reason = None
+            elif failures:
+                reason = '; '.join(
+                    f"{item.get('title') or 'track'}: {item.get('error')}"
+                    for item in failures[:3])[:300]
+            else:
+                reason = result.get('error', 'Download failed')
         except Exception as exc:
             logger.error("Job %s failed: %s", job['id'], exc, exc_info=True)
             status, reason, result = 'failed', str(exc), None
@@ -228,6 +242,7 @@ class JobManager:
                         'successful': (result or {}).get('successful'),
                         'failed': (result or {}).get('failed'),
                         'total_tracks': (result or {}).get('total_tracks'),
+                        'failures': failures[:50],
                     } if result else None
                     current['updated_at'] = _now()
                     break

@@ -424,11 +424,17 @@ class DownloadManager:
                     'thumbnail_path': final_thumbnail,
                 }
 
+            attempts = []
+            try:
+                attempts = self.get_download_progress().get('attempts') or []
+            except Exception:
+                pass
             return {
                 'success': False,
                 'error': last_error or 'Could not find track from any source',
                 'duration': None,
                 'thumbnail_path': None,
+                'attempts': attempts[-8:],
             }
 
         except Exception as e:

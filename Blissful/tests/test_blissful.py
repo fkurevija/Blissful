@@ -1031,3 +1031,33 @@ def test_wanted_search_creates_downloads_job(tmp_path):
     assert jobs.record['status'] == 'succeeded'
     assert jobs.record['progress']['phase'] == 'search finished'
     assert jobs.record['result']['blissful_fallback'] == 1
+
+
+def test_failed_job_records_per_track_rejection_reason(tmp_path):
+    from extend.job_manager import JobManager
+
+    class Config:
+        def get_setting(self, key, default=None):
+            return 7 if key == 'job_retention_days' else default
+
+    class Albums:
+        def download_album(self, **kwargs):
+            return {
+                'success': False,
+                'error': 'Download failed',
+                'successful': 0, 'failed': 1, 'total_tracks': 1,
+                'tracks': [{
+                    'title': 'Rare Demo', 'success': False,
+                    'error': 'Could not find track from any source',
+                    'attempts': [{'source': 'ytsearch1:Rare Demo',
+                                  'status': 'failed', 'reason': 'no results'}],
+                }],
+            }
+
+    manager = JobManager(Config(), Albums(), str(tmp_path / 'jobs.json'))
+    job, _ = manager.enqueue('album', {'artist': 'A', 'album': 'B', 'tracks': []})
+    manager._process(manager._next_pending())
+    stored = manager.get_job(job['id'])
+    assert 'Rare Demo' in stored['failure_reason']
+    assert stored['result']['failures'][0]['error'] == 'Could not find track from any source'
+    assert stored['result']['failures'][0]['attempts'][0]['source'].startswith('ytsearch1:')

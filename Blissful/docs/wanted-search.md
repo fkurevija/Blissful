@@ -6,7 +6,9 @@ default** — tick *Apply* to actually queue searches or delete queue entries.
 A sticky toast in the corner shows a short progress summary and finishes with a
 success or failure message plus a **View downloads** link. Full queue details,
 history and retry controls (retry appears only on failed rows) live on the new
-**Downloads** tab, whose columns can be sorted. Job history is stored in `/app/downloads/jobs.json`, so it survives
+**Downloads** tab, whose columns can be sorted. Failed jobs record a reason per
+track (including duration-guard rejections and source attempts); hover the Detail
+cell for the full list. Job history is stored in `/app/downloads/jobs.json`, so it survives
 container recreation.
 one search or cleanup may run at a time; the action buttons are disabled while a
 run is active (including runs started by the scheduler or another tab).

@@ -270,6 +270,7 @@ class AlbumManager:
                         results['successful'] += 1
                     else:
                         track_result['error'] = download_result.get('error')
+                        track_result['attempts'] = download_result.get('attempts') or []
                         results['failed'] += 1
                         
                 except Exception as e:
