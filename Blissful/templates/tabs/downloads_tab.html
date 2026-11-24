@@ -34,7 +34,7 @@
 .job-details-pane {
     position: fixed; top: 10%; left: 50%; transform: translateX(-50%);
     width: min(720px, 92vw); height: min(85vh, 820px);
-    background: var(--card, #1e1e1e); border: 1px solid var(--border, #444);
+    background: var(--card); border: 1px solid var(--border);
     border-radius: 8px; box-shadow: 0 8px 32px rgba(0,0,0,0.45); display: none; flex-direction: column;
     z-index: 10000; padding: 16px; overflow: hidden;
 }
@@ -44,7 +44,7 @@
 .job-details-line:hover { background: rgba(255,255,255,0.04); }
 .job-detail-heading { margin-top: 10px; font-weight: 600; color: var(--muted-foreground); }
 .job-details-header h3 { margin: 0; font-size: 18px; }
-.job-details-body { font-size: 13px; line-height: 1.5; color: var(--foreground, #fff); flex: 0 0 auto; min-height: 0; max-height: 32%; overflow-y: auto; }
+.job-details-body { font-size: 13px; line-height: 1.5; color: var(--foreground); flex: 0 0 auto; min-height: 0; max-height: 32%; overflow-y: auto; }
 /* ---- Enhanced job details ---- */
 .job-details-summary { flex: 0 0 auto; display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 10px; padding: 8px 10px; background: rgba(255,255,255,0.03); border: 1px solid var(--border, #444); border-radius: 5px; font-size: 12px; }
 .job-progress { flex: 1 1 160px; height: 8px; background: rgba(255,255,255,0.1); border-radius: 4px; overflow: hidden; min-width: 100px; }
@@ -67,8 +67,8 @@
 .job-details-body li { margin-bottom: 6px; }
 .job-details-log-wrap { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 .job-details-log-wrap > .job-detail-heading { flex: 0 0 auto; }
-.job-details-log { margin-top: 8px; padding: 8px 10px; background: rgba(0,0,0,0.35); border: 1px solid var(--border, #444); border-radius: 5px; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; line-height: 1.5; flex: 1 1 auto; min-height: 0; overflow-y: auto; }
-.job-details-log .job-log-entry { user-select: text; cursor: text; white-space: normal; overflow-wrap: anywhere; word-break: break-word; font-family: ui-monospace, Menlo, Consolas, monospace; padding: 8px 10px; margin-bottom: 10px; background: rgba(255,255,255,0.03); border: 1px solid var(--border, #444); border-radius: 5px; line-height: 1.45; }
+.job-details-log { margin-top: 8px; padding: 8px 10px; background: var(--card); border: 1px solid var(--border); border-radius: 5px; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; line-height: 1.5; flex: 1 1 auto; min-height: 0; overflow-y: auto; }
+.job-details-log .job-log-entry { user-select: text; cursor: text; white-space: normal; overflow-wrap: anywhere; word-break: break-word; font-family: ui-monospace, Menlo, Consolas, monospace; padding: 8px 10px; margin-bottom: 10px; background: var(--card); border: 1px solid var(--border); border-radius: 5px; line-height: 1.45; }
 .job-details-log .job-log-entry:last-child { margin-bottom: 0; }
 .job-details-log .job-log-entry:hover { background: rgba(255,255,255,0.06); }
 .log-snapshot-title { font-weight: 700; color: var(--foreground, #fff); margin-bottom: 8px; }

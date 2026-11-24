@@ -186,6 +186,7 @@ let detailsJobId = null;
 let detailsPlainText = '';
 let detailsMarkdown = '';
 let detailsFilter = { text: '', failuresOnly: false };
+let detailsOpenSet = new Set();  // indices of expanded Download Attempts sections
 
 function escapeHtml(text) {
     if (text == null) return '';
@@ -504,7 +505,7 @@ function renderJobDetails(job) {
         return String(JSON.stringify(item)).toLowerCase().includes(detailsFilter.text);
     }
 
-    function buildEntry(item) {
+    function buildEntry(item, renderedIdx) {
         const entry = document.createElement('div');
         entry.className = 'job-log-entry';
         if (!item || typeof item !== 'object') {
@@ -599,6 +600,12 @@ function renderJobDetails(job) {
                 details.appendChild(bullet(frag));
             });
             entry.appendChild(details);
+            details.dataset.idx = renderedIdx;
+            if (detailsOpenSet.has(renderedIdx)) details.open = true;
+            summary.addEventListener('click', () => {
+                if (details.open) detailsOpenSet.delete(renderedIdx);
+                else detailsOpenSet.add(renderedIdx);
+            });
         }
         entry.dataset.plain = entryPlainText(item);
         return entry;
@@ -639,10 +646,19 @@ function renderJobDetails(job) {
     function renderLogEntries() {
         logPane.innerHTML = '';
         let shown = 0;
+        let renderedIdx = 0;
         log.forEach(item => {
             if (!entryMatchesFilter(item)) return;
-            logPane.appendChild(buildEntry(item));
+            logPane.appendChild(buildEntry(item, renderedIdx));
+            renderedIdx++;
             shown++;
+        });
+        // Re-apply persisted open/collapsed state so expanding one section
+        // does not get reset when new log entries arrive on the next poll.
+        detailsOpenSet.forEach(idx => {
+            const el = logPane.children[idx];
+            if (el && el.querySelector('.log-attempts'))
+                el.querySelector('.log-attempts').open = true;
         });
         if (!shown) logPane.textContent = log.length ? '(no entries match the filter)' : '(waiting for log entries…)';
         logPane.dataset.init = '1';
