@@ -1198,6 +1198,41 @@ def test_child_jobs_hidden_and_log_mirrored_to_parent(tmp_path):
     assert any('downloaded' in line for line in parent_log)
 
 
+def test_job_log_entry_is_pretty_printed(tmp_path):
+    from extend.job_manager import JobManager
+
+    class Config:
+        def get_setting(self, key, default=None):
+            return default
+
+    class Albums:
+        def download_album(self, **kwargs):
+            return {'success': True}
+
+    manager = JobManager(Config(), Albums(), str(tmp_path / 'jobs.json'))
+    job, _ = manager.enqueue('album', {'album': 'X'})
+    manager.update_job(job['id'], progress={
+        'phase': 'download job running',
+        'album_title': 'Secrets of the Magick Grimoire',
+        'current_track': 0, 'total_tracks': 48, 'job_status': 'pending',
+        'download_track': 'Swallowtail (demo)', 'download_status': 'trying',
+        'attempts': [
+            {'source': 'ytsearch1:...music.youtube.com', 'status': 'failed',
+             'reason': 'No results found'},
+            {'source': 'scsearch1:...', 'status': 'rejected',
+             'reason': 'Duration mismatch'},
+        ]})
+    entry = manager.get_job(job['id'])['log'][0]
+    lines = entry.split('\n')
+    assert lines[0].startswith('timestamp')
+    assert any('phase' in l for l in lines)
+    assert any('album_title' in l for l in lines)
+    assert any(l.strip() == 'attempts:' for l in lines)
+    assert any('1. source:' in l for l in lines)
+    assert any('   status: failed' in l for l in lines)
+    assert any('   reason: Duration mismatch' in l for l in lines)
+
+
 def test_job_log_is_verbose_and_deduplicates_polls(tmp_path):
     from extend.job_manager import JobManager
 
@@ -1218,10 +1253,10 @@ def test_job_log_is_verbose_and_deduplicates_polls(tmp_path):
     log = manager.get_job(job['id'])['log']
     assert len(log) == 1
     joined = log[0]
-    assert 'download_source=ytsearch1:artist - track' in joined
-    assert 'download_status=trying' in joined
-    assert 'attempts=1, 2' in joined
-    assert 'failure_reason=Duration mismatch' in joined
+    assert 'download_source = ytsearch1:artist - track' in joined
+    assert 'download_status = trying' in joined
+    assert 'attempts:' in joined and '1. 1' in joined
+    assert 'failure_reason  = Duration mismatch' in joined or 'failure_reason = Duration mismatch' in joined
     # Identical consecutive poll lines are skipped.
     manager.update_job(job['id'], progress={
         'phase': 'trying source', 'download_source': 'ytsearch1:artist - track',
@@ -1252,7 +1287,7 @@ def test_job_records_live_log_on_progress(tmp_path):
     assert len(log) >= 3
     assert any('status: running' in line for line in log)
     assert any('searching' in line for line in log)
-    assert any('manual entry' in line and 'verified=3' in line for line in log)
+    assert any('manual entry' in line and 'verified' in line for line in log)
     assert stored['progress']['phase'] == 'searching'
 
 

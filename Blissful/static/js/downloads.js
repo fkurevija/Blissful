@@ -276,18 +276,24 @@ function renderJobDetails(job) {
         detailsPane.insertBefore(label, detailsPane.querySelector('.job-details-footer'));
         detailsPane.insertBefore(logPane, detailsPane.querySelector('.job-details-footer'));
     }
+    const wasAtBottom = !logPane.dataset.init ||
+        (logPane.scrollHeight - logPane.scrollTop - logPane.clientHeight) < 24;
     logPane.innerHTML = '';
     if (log.length) {
         log.forEach(text => {
-            const line = document.createElement('div');
-            line.className = 'job-log-line';
-            line.textContent = text;
-            logPane.appendChild(line);
+            const entry = document.createElement('div');
+            entry.className = 'job-log-entry';
+            entry.textContent = text;
+            logPane.appendChild(entry);
         });
     } else {
         logPane.textContent = '(waiting for log entries…)';
     }
-    logPane.scrollTop = logPane.scrollHeight;
+    logPane.dataset.init = '1';
+    // Only autoscroll when the user was already at the bottom (or on the
+    // first render). If they scrolled up to read older entries, leave
+    // their scroll position alone until they scroll back down.
+    if (wasAtBottom) logPane.scrollTop = logPane.scrollHeight;
     // Keep the plain log text for the Copy logs button.
     detailsPlainText = log.length ? log.join('\n') : '';
     const live = job.status === 'pending' || job.status === 'running';

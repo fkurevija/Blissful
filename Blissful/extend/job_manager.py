@@ -224,12 +224,7 @@ class JobManager:
 
     @staticmethod
     def _log_value(value):
-        """Compact, readable rendering of any detail value for the log."""
-        if isinstance(value, (list, tuple)):
-            return ', '.join(JobManager._log_value(v) for v in value[:8])
-        if isinstance(value, dict):
-            return '{' + ', '.join('%s=%s' % (k, JobManager._log_value(v))
-                                      for k, v in list(value.items())[:8]) + '}'
+        """Compact, readable rendering of a scalar detail value."""
         if value is None:
             return ''
         text = str(value)
@@ -237,20 +232,57 @@ class JobManager:
 
     @staticmethod
     def _log_line(message, **details):
-        """Format one timestamped, human-readable job log line.
+        """Format one timestamped, pretty-printed job log entry.
 
-        Every detail field is included (nothing silently dropped) so the
-        Details pane log is genuinely verbose: source attempts, current
-        track, durations, Lidarr status, reasons, etc.
+        Returns a multi-line block with aligned ``key = value`` fields and
+        an expanded, numbered ``attempts:`` section. Every detail field is
+        included (nothing silently dropped). The UI renders each entry in
+        its own box with spacing so long logs stay readable.
         """
-        parts = [message]
+        fields = {}
         for key, value in details.items():
             if value is None or value == '' or key == 'phase':
                 continue
-            rendered = JobManager._log_value(value)
-            if rendered:
-                parts.append('%s=%s' % (key, rendered))
-        return '%s  %s' % (datetime.now().strftime('%H:%M:%S'), ' · '.join(parts))
+            if key in ('attempts', 'failures') and isinstance(value, (list, tuple)):
+                continue  # expanded as a numbered section below
+            if key == 'phase':
+                continue
+            fields[key] = JobManager._log_value(value)
+        # The phase message doubles as the first field, matching the UI.
+        if message and message != 'progress':
+            fields.setdefault('phase', JobManager._log_value(message))
+        fields.setdefault('timestamp', datetime.now().strftime('%H:%M:%S'))
+        ordered = [
+            'timestamp', 'phase', 'album_title', 'album_index', 'total_albums',
+            'current_track', 'total_tracks', 'processed', 'total', 'verified',
+            'job_status', 'command_status', 'album_id', 'download_track',
+            'download_artist', 'download_source', 'download_status',
+            'download_pending', 'source', 'status', 'imported', 'deleted',
+            'kept', 'pending', 'failure_reason', 'reason',
+        ]
+        keys = [k for k in ordered if k in fields]
+        keys += sorted(k for k in fields if k not in ordered)
+        width = max((len(k) for k in keys), default=0)
+        lines = ['%s = %s' % (k.ljust(width), fields[k]) for k in keys]
+        for section in ('attempts', 'failures'):
+            values = details.get(section)
+            if not isinstance(values, (list, tuple)) or not values:
+                continue
+            lines.append('')
+            lines.append('%s:' % section)
+            for index, item in enumerate(values, 1):
+                if isinstance(item, dict):
+                    first = True
+                    for field in ('source', 'status', 'reason', 'error', 'title'):
+                        val = item.get(field)
+                        if val in (None, ''):
+                            continue
+                        prefix = '%d. ' % index if first else '   '
+                        lines.append('%s%s: %s' % (prefix, field, JobManager._log_value(val)))
+                        first = False
+                else:
+                    lines.append('%d. %s' % (index, JobManager._log_value(item)))
+        return '\n'.join(lines)
 
     def _append_log_locked(self, job, message, **details):
         """Append a log line to a job and mirror it to its parent run.
@@ -260,12 +292,13 @@ class JobManager:
         """
         line = self._log_line(message, **details)
         log = job.setdefault('log', [])
-        body = line[9:] if len(line) > 9 and line[8] == ' ' else line
-        if log:
-            last = log[-1]
-            last_body = last[9:] if len(last) > 9 and last[8] == ' ' else last
-            if last_body == body:
-                return
+        # Ignore the timestamp line when comparing consecutive entries so
+        # a repeating 2-second poll is not appended again and again.
+        def body_of(text):
+            parts = text.split('\n', 1)
+            return parts[1] if len(parts) > 1 else text
+        if log and body_of(log[-1]) == body_of(line):
+            return
         log.append(line)
         del log[:-200]
         parent_id = job.get('parent_id')
