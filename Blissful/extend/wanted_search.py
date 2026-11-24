@@ -230,7 +230,7 @@ class WantedSearchService:
 
     def _gapfill_album(self, album_id, apply=True, source='stale-cleanup',
 
-                       progress_hook=None):
+                       progress_hook=None, parent_id=None):
 
         """Hand an album to Blissful's own download/tag/link engine."""
 
@@ -262,7 +262,7 @@ class WantedSearchService:
 
             return engine(album_id, apply=apply, source=source,
 
-                          progress=progress)
+                          progress=progress, parent_id=parent_id)
 
         if callable(self.gapfill):
 
@@ -384,7 +384,7 @@ class WantedSearchService:
 
             try:
 
-                for job in self.job_manager.list_jobs(limit=200):
+                for job in self.job_manager.list_jobs(limit=200, include_children=True):
 
                     if job.get('status') in ('pending', 'running'):
 
@@ -1345,6 +1345,8 @@ class WantedSearchService:
 
                         progress_hook=progress_hook,
 
+                        parent_id=(search_job or {}).get('id'),
+
                     ) or {}
 
                 except Exception as exc:
@@ -1600,6 +1602,56 @@ class WantedSearchService:
 
         report = self._empty_cleanup_report(apply)
 
+
+
+        # One top-level cleanup job represents the whole run. Per-album
+
+        # import jobs are children; their log lines mirror into this job.
+
+        cleanup_job = None
+
+        if self.job_manager is not None:
+
+            try:
+
+                cleanup_job, _duplicate = self.job_manager.enqueue(
+
+                    'cleanup', {'mode': 'stale-cleanup', 'apply': bool(apply),
+
+                                'source': 'stale-cleanup'},
+
+                    dedupe_key='stale-cleanup-run-%s' % time.time())
+
+                if cleanup_job:
+
+                    self.job_manager.update_job(cleanup_job['id'],
+
+                                                status='running',
+
+                                                progress={'phase': 'scanning'})
+
+            except Exception:
+
+                cleanup_job = None
+
+
+
+        cleanup_job_id = cleanup_job['id'] if cleanup_job else None
+
+
+
+        def job_progress(**changes):
+
+            if cleanup_job_id:
+
+                try:
+
+                    self.job_manager.update_job(cleanup_job_id, **changes)
+
+                except Exception:
+
+                    pass
+
         self._set_active(kind='cleanup', apply=apply, phase='scanning',
 
                          started_at=time.time(), scanned=0, searched=0,
@@ -1758,7 +1810,7 @@ class WantedSearchService:
 
                     progress_hook, progress_state = self._aggregate_progress_callback(
 
-                        self, progress, index, total_albums,
+                        self, job_progress, index, total_albums,
 
                         grand_total_tracks or 1, '', title,
 
@@ -1804,6 +1856,8 @@ class WantedSearchService:
                             album_id, apply=True, source='stale-cleanup',
 
                             progress_hook=progress_hook,
+
+                            parent_id=cleanup_job_id,
 
                         ) or {}
 
@@ -2024,6 +2078,30 @@ class WantedSearchService:
                              'kept', 'skipped', 'errors')}
 
         self._finish_active('completed' if not report['errors'] else 'completed with errors')
+
+        if cleanup_job_id:
+
+            counts = report.get('counts') or {}
+
+            job_progress(
+
+                status='succeeded' if not report.get('errors') else 'failed',
+
+                failure_reason=('; '.join(report['errors'][:2])[:200]
+
+                                if report.get('errors') else None),
+
+                result={'command': 'stale-cleanup',
+
+                        'imported': counts.get('imported', 0),
+
+                        'deleted': counts.get('deleted', 0),
+
+                        'kept': counts.get('kept', 0),
+
+                        'skipped': counts.get('skipped', 0)},
+
+            )
 
         return report
 

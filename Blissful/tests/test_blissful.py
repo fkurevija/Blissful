@@ -504,7 +504,7 @@ def test_failed_imports_apply_verifies_and_records_state(tmp_path, monkeypatch):
         def __init__(self):
             self.payload = None
 
-        def enqueue(self, kind, payload):
+        def enqueue(self, kind, payload, **kwargs):
             self.payload = payload
             return {'id': 'job-1'}, False
 
@@ -683,7 +683,7 @@ def test_wanted_search_apply_posts_commands(tmp_path):
             return {'id': cid, 'status': 'completed', 'message': '0 reports downloaded'}
 
     class Gapfill:
-        def gapfill_album(self, aid, apply=True, source='', progress=None):
+        def gapfill_album(self, aid, apply=True, source='', progress=None, **kwargs):
             calls.append(('gapfill', aid, source))
             return {'status': 'succeeded', 'imported': 1}
 
@@ -734,7 +734,7 @@ def test_stale_cleanup_deletes_only_after_import(tmp_path, monkeypatch):
             return {'success': True}
 
     class Gapfill:
-        def gapfill_album(self, aid, apply=True, source='', progress=None):
+        def gapfill_album(self, aid, apply=True, source='', progress=None, **kwargs):
             calls.append(('gapfill', aid, apply, source))
             return {'status': 'succeeded', 'imported': 1}
 
@@ -1087,14 +1087,14 @@ def test_wanted_search_creates_downloads_job(tmp_path):
             return {'id': cid, 'status': 'completed', 'message': 'ok'}
 
     class Gapfill:
-        def gapfill_album(self, aid, apply=True, source='', progress=None):
+        def gapfill_album(self, aid, apply=True, source='', progress=None, **kwargs):
             return {'status': 'succeeded', 'imported': 1}
 
     class Jobs:
         def __init__(self):
             self.record = {}
 
-        def enqueue(self, kind, payload, dedupe_key=None):
+        def enqueue(self, kind, payload, dedupe_key=None, **kwargs):
             self.record = {'id': 'job-1', 'kind': kind, 'payload': payload,
                            'status': 'pending'}
             return self.record, False
@@ -1126,7 +1126,7 @@ def test_cancel_active_stops_run_and_job(tmp_path):
         def __init__(self):
             self.items = [{'id': 'j', 'status': 'running'}]
 
-        def list_jobs(self, limit=100):
+        def list_jobs(self, limit=100, include_children=False):
             return list(self.items)
 
         def cancel_job(self, jid):
@@ -1170,6 +1170,32 @@ def test_poll_job_stops_on_cancelled_or_missing_job(monkeypatch):
     # A deleted job (get_job -> None) must also stop, not poll to timeout.
     svc = FailedImportsRetry(Config(), object(), None, None, Jobs(None))
     assert svc._poll_job('j', timeout_s=5)['status'] == 'cancelled'
+
+
+def test_child_jobs_hidden_and_log_mirrored_to_parent(tmp_path):
+    from extend.job_manager import JobManager
+
+    class Config:
+        def get_setting(self, key, default=None):
+            return default
+
+    class Albums:
+        def download_album(self, **kwargs):
+            return {'success': True}
+
+    manager = JobManager(Config(), Albums(), str(tmp_path / 'jobs.json'))
+    parent, _ = manager.enqueue('cleanup', {'mode': 'stale-cleanup'})
+    child, _ = manager.enqueue('album', {'album': 'X'}, parent_id=parent['id'])
+    # Only the top-level cleanup job is listed.
+    listed = manager.list_jobs()
+    assert len(listed) == 1 and listed[0]['id'] == parent['id']
+    assert len(manager.list_jobs(include_children=True)) == 2
+    # Child log lines mirror into the parent so the Details pane shows all.
+    manager.append_log(child['id'], 'child phase', artist='A')
+    manager.update_job(child['id'], progress={'phase': 'downloaded'})
+    parent_log = manager.get_job(parent['id'])['log']
+    assert any('child phase' in line for line in parent_log)
+    assert any('phase=downloaded' in line for line in parent_log)
 
 
 def test_job_records_live_log_on_progress(tmp_path):

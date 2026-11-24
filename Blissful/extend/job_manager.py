@@ -59,8 +59,12 @@ class JobManager:
         tmp.replace(self.storage_path)
 
     # ------------------------------------------------------------------ public API
-    def enqueue(self, kind, payload, dedupe_key=None):
-        """Add a job, returning an existing live job when the key matches."""
+    def enqueue(self, kind, payload, dedupe_key=None, parent_id=None):
+        """Add a job, returning an existing live job when the key matches.
+
+        ``parent_id`` marks this as a child import job of a search/cleanup
+        run; child jobs are hidden from the top-level history list.
+        """
         with self._lock:
             key = dedupe_key or self._dedupe_key(kind, payload)
             for job in self.jobs:
@@ -80,6 +84,7 @@ class JobManager:
                 'attempts': 0,
                 'result': None,
                 'log': [],
+                'parent_id': parent_id,
                 'created_at': _now(),
                 'updated_at': _now(),
             }
@@ -95,9 +100,12 @@ class JobManager:
         title = payload.get('album') or payload.get('title', '')
         return f"{kind}:{album or title}:{artist}".lower()
 
-    def list_jobs(self, limit=100, status=None):
+    def list_jobs(self, limit=100, status=None, include_children=False):
+        """List top-level jobs; child import jobs are hidden by default."""
         with self._lock:
             jobs = self.jobs if not status else [j for j in self.jobs if j.get('status') == status]
+            if not include_children:
+                jobs = [j for j in jobs if not j.get('parent_id')]
             return [dict(j) for j in jobs[:max(1, min(int(limit), 500))]]
 
     def delete_job(self, job_id):
@@ -227,14 +235,28 @@ class JobManager:
                 parts.append('%s=%s' % (key, value))
         return '%s  %s' % (datetime.now().strftime('%H:%M:%S'), ' · '.join(parts))
 
+    def _append_log_locked(self, job, message, **details):
+        """Append a log line to a job and mirror it to its parent run."""
+        line = self._log_line(message, **details)
+        log = job.setdefault('log', [])
+        log.append(line)
+        del log[:-200]
+        parent_id = job.get('parent_id')
+        if parent_id:
+            for parent in self.jobs:
+                if parent['id'] == parent_id:
+                    plog = parent.setdefault('log', [])
+                    plog.append(line)
+                    del plog[:-200]
+                    parent['updated_at'] = _now()
+                    break
+
     def append_log(self, job_id, message, **details):
         """Append a line to a job's live log (bounded to 200 lines)."""
         with self._lock:
             for job in self.jobs:
                 if job['id'] == job_id:
-                    log = job.setdefault('log', [])
-                    log.append(self._log_line(message, **details))
-                    del log[:-200]
+                    self._append_log_locked(job, message, **details)
                     job['updated_at'] = _now()
                     self._persist()
                     return dict(job)
@@ -249,14 +271,10 @@ class JobManager:
                     # job has a live log without callers doing extra work.
                     progress = changes.get('progress')
                     if isinstance(progress, dict):
-                        log = job.setdefault('log', [])
                         message = str(progress.get('phase') or 'progress')
-                        log.append(self._log_line(message, **progress))
-                        del log[:-200]
+                        self._append_log_locked(job, message, **progress)
                     elif 'status' in changes and changes['status'] != job.get('status'):
-                        log = job.setdefault('log', [])
-                        log.append(self._log_line('status: %s' % changes['status']))
-                        del log[:-200]
+                        self._append_log_locked(job, 'status: %s' % changes['status'])
                     job.update(changes)
                     job['updated_at'] = _now()
                     self._persist()

@@ -34,6 +34,8 @@ function jobLabel(job) {
     const artist = payload.artist || '';
     const album = payload.album || '';
     if (artist && album) return `${artist} — ${album}`;
+    if (payload.mode === 'stale-cleanup') return 'Stale torrent cleanup';
+    if (payload.mode === 'all' || payload.mode === 'selected') return 'Wanted search';
     return album || artist || job.dedupe_key || job.id;
 }
 

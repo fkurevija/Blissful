@@ -467,7 +467,8 @@ class FailedImportsRetry:
     # -------------------------------------------------------------- gap fill
     def gapfill_album(self, aid, apply=True, state=None, naming_config=None,
                       extension=None, source='failed-imports',
-                      respect_state=True, progress=None, timeout_s=None):
+                      respect_state=True, progress=None, timeout_s=None,
+                      parent_id=None):
         """Run the full Blissful gap-fill for one album.
 
         This is the shared engine behind ``--retry-failed-imports`` and stale
@@ -579,7 +580,7 @@ class FailedImportsRetry:
                 'source': source,
             }
             try:
-                job, _duplicate = self.job_manager.enqueue('album', job_payload)
+                job, _duplicate = self.job_manager.enqueue('album', job_payload, parent_id=parent_id)
             except Exception as exc:
                 entry.update(status='failed',
                              reason='enqueue error: %s' % str(exc)[:200])
