@@ -75,7 +75,7 @@ function renderJobs(jobs) {
         headRow.appendChild(th);
     });
     const actionHead = document.createElement('th');
-    actionHead.textContent = '';
+    actionHead.textContent = 'Actions';
     headRow.appendChild(actionHead);
     head.appendChild(headRow);
     table.appendChild(head);
@@ -107,26 +107,25 @@ function renderJobs(jobs) {
         const result = job.result || {};
         const failures = result.failures || [];
         const progress = job.progress || {};
-        const parts = [];
-        if (progress.phase) parts.push(progress.phase);
-        if (progress.album_title) parts.push(progress.album_title);
-        if (progress.processed !== undefined && progress.total) {
-            parts.push(`${progress.processed}/${progress.total}`);
-        }
-        if (progress.command_status) parts.push(`Lidarr: ${progress.command_status}`);
-        if (job.failure_reason) parts.push(job.failure_reason);
-        if (job.status === 'failed' && !result.failures?.length) {
-            parts.push('no per-track reasons recorded (older job)');
-        }
-        if (result.successful !== undefined) parts.push(`${result.successful} imported`);
-        if (result.failed) parts.push(`${result.failed} failed`);
-        if (result.total_tracks) parts.push(`${result.total_tracks} total`);
-        if (result.command) parts.push(`command ${result.command}`);
-        if (result.blissful_fallback) parts.push(`${result.blissful_fallback} Blissful fallback`);
-        detail.textContent = parts.join(' · ').slice(0, 80);
+        const hasDetail = Boolean(
+            job.failure_reason || failures.length ||
+            result.successful !== undefined || result.failed ||
+            result.total_tracks || progress.phase || progress.album_title
+        );
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'btn btn-secondary job-action job-details';
+        btn.textContent = hasDetail ? 'Details' : '—';
+        btn.disabled = !hasDetail;
+        btn.dataset.jobId = job.id;
+        btn.addEventListener('click', () => {
+            if (hasDetail) showJobDetails(job);
+        });
+        detail.appendChild(btn);
         row.appendChild(detail);
 
         const actions = document.createElement('td');
+        actions.className = 'job-actions';
         if (job.status === 'failed') {
             const retry = document.createElement('button');
             retry.type = 'button';
@@ -183,6 +182,68 @@ function renderJobs(jobs) {
     });
     table.appendChild(body);
     list.appendChild(table);
+}
+
+let detailsPane = null;
+
+function escapeHtml(text) {
+    if (text == null) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+function showJobDetails(job) {
+    if (!detailsPane) {
+        const pane = document.createElement('div');
+        pane.className = 'job-details-pane';
+        pane.innerHTML = `
+            <div class="job-details-header">
+                <h3>Job details</h3>
+                <button type="button" class="btn btn-secondary job-details-close">Close</button>
+            </div>
+            <div class="job-details-body"></div>
+        `;
+        pane.querySelector('.job-details-close').addEventListener('click', () => {
+            pane.style.display = 'none';
+        });
+        document.getElementById('jobsList').parentElement.appendChild(pane);
+        detailsPane = pane;
+    }
+    const body = detailsPane.querySelector('.job-details-body');
+    const result = job.result || {};
+    const failures = result.failures || [];
+    const progress = job.progress || {};
+    const lines = [];
+    lines.push(`<strong>Job:</strong> ${escapeHtml(jobLabel(job))}`);
+    lines.push(`<strong>Status:</strong> ${escapeHtml(job.status)}`);
+    lines.push(`<strong>Source:</strong> ${escapeHtml(job.source || '')}`);
+    lines.push(`<strong>Updated:</strong> ${escapeHtml(job.updated_at || '')}`);
+    if (job.failure_reason) lines.push(`<strong>Failure reason:</strong> ${escapeHtml(job.failure_reason)}`);
+    if (progress.phase) lines.push(`<strong>Phase:</strong> ${escapeHtml(progress.phase)}`);
+    if (progress.album_title) lines.push(`<strong>Album:</strong> ${escapeHtml(progress.album_title)}`);
+    if (progress.processed !== undefined && progress.total) {
+        lines.push(`<strong>Progress:</strong> ${progress.processed}/${progress.total}`);
+    }
+    if (progress.command_status) lines.push(`<strong>Lidarr:</strong> ${escapeHtml(progress.command_status)}`);
+    if (result.successful !== undefined) lines.push(`<strong>Imported:</strong> ${result.successful}`);
+    if (result.failed !== undefined) lines.push(`<strong>Failed:</strong> ${result.failed}`);
+    if (result.total_tracks !== undefined) lines.push(`<strong>Total tracks:</strong> ${result.total_tracks}`);
+    if (result.command !== undefined) lines.push(`<strong>Command:</strong> ${result.command}`);
+    if (result.blissful_fallback !== undefined) lines.push(`<strong>Blissful fallback:</strong> ${result.blissful_fallback}`);
+    if (failures.length) {
+        lines.push(`<strong>Per-track failures (${failures.length}):</strong>`);
+        lines.push('<ul style="margin:6px 0 0 1.2em; padding:0">');
+        failures.forEach(f => {
+            const attempts = Array.isArray(f.attempts) ? f.attempts.map(a => escapeHtml(a.source + ': ' + (a.error || a.message))).join('<br>') : '';
+            lines.push(`<li><strong>${escapeHtml(f.title || 'track')}</strong>: ${escapeHtml(f.error || '')}`);
+            if (attempts) lines.push(`<div style="margin-top:2px; font-size:12px; color:var(--muted-foreground)">${attempts}</div>`);
+            lines.push('</li>');
+        });
+        lines.push('</ul>');
+    }
+    body.innerHTML = lines.join('<br>') || '<em>No details recorded.</em>';
+    detailsPane.style.display = 'block';
 }
 
 async function loadJobs() {

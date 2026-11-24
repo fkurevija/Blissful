@@ -30,6 +30,19 @@
 .job-reason { max-width: 340px; color: var(--muted-foreground); word-break: break-word; }
 .jobs-table .job-action { padding: 4px 10px; font-size: 12px; min-width: 56px; }
 .jobs-table td button + button { margin-left: 6px; }
+.jobs-table .job-actions { display: flex; gap: 6px; align-items: center; }
+.job-details-pane {
+    position: fixed; top: 10%; left: 50%; transform: translateX(-50%);
+    width: min(720px, 92vw); max-height: 75vh; overflow: auto;
+    background: var(--card, #1e1e1e); border: 1px solid var(--border, #444);
+    border-radius: 8px; box-shadow: 0 8px 32px rgba(0,0,0,0.45);
+    z-index: 10000; padding: 16px; display: none;
+}
+.job-details-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.job-details-header h3 { margin: 0; font-size: 18px; }
+.job-details-body { font-size: 13px; line-height: 1.5; color: var(--foreground, #fff); }
+.job-details-body ul { margin: 6px 0 0 1.2em; padding: 0; }
+.job-details-body li { margin-bottom: 6px; }
 .wanted-toast-link { margin-left: 10px; background: transparent; border: 1px solid rgba(255,255,255,0.6); color: #fff; border-radius: 4px; padding: 2px 6px; cursor: pointer; font-size: 12px; }
 .wanted-toast-link:hover { background: rgba(255,255,255,0.15); }
 </style>
