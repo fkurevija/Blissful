@@ -100,6 +100,8 @@ class JobManager:
                 'log': [],
                 'parent_id': parent_id,
                 'created_at': _now(),
+                'started_at': None,
+                'finished_at': None,
                 'updated_at': _now(),
             }
             self.jobs.insert(0, job)
@@ -120,7 +122,16 @@ class JobManager:
             jobs = self.jobs if not status else [j for j in self.jobs if j.get('status') == status]
             if not include_children:
                 jobs = [j for j in jobs if not j.get('parent_id')]
-            return [dict(j) for j in jobs[:max(1, min(int(limit), 500))]]
+            selected = jobs[:max(1, min(int(limit), 500))]
+            result = []
+            for job in selected:
+                item = dict(job)
+                if not include_children:
+                    item['child_count'] = sum(
+                        1 for child in self.jobs
+                        if child.get('parent_id') == job.get('id'))
+                result.append(item)
+            return result
 
     def delete_job(self, job_id):
         """Remove one job from history (including stuck pending records)."""
@@ -333,7 +344,12 @@ class JobManager:
                         self._append_log_locked(job, 'failure',
                                                 failure_reason=changes['failure_reason'])
                     job.update(changes)
-                    job['updated_at'] = _now()
+                    now = _now()
+                    job['updated_at'] = now
+                    if changes.get('status') == 'running' and not job.get('started_at'):
+                        job['started_at'] = now
+                    if changes.get('status') in TERMINAL_STATUSES and not job.get('finished_at'):
+                        job['finished_at'] = now
                     self._persist()
                     return dict(job)
         return None
@@ -344,6 +360,7 @@ class JobManager:
                 if job.get('status') == 'pending' and \
                         job.get('kind') in self.managed_kinds:
                     job['status'] = 'running'
+                    job['started_at'] = job.get('started_at') or _now()
                     job['updated_at'] = _now()
                     self._persist()
                     return dict(job)
@@ -396,6 +413,7 @@ class JobManager:
                         'total_tracks': (result or {}).get('total_tracks'),
                         'failures': failures[:50],
                     } if result else None
+                    current['finished_at'] = _now()
                     current['updated_at'] = _now()
                     break
             self._persist()

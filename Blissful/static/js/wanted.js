@@ -66,9 +66,15 @@ function wantedToast(id, message, type) {
         el.className = 'wanted-toast';
         el.innerHTML = '<span class="wanted-toast-dot"></span><span class="wanted-toast-text"></span>' +
             '<button type="button" class="wanted-toast-cancel">Cancel</button>' +
+            '<button type="button" class="wanted-toast-details" style="display:none">View details →</button>' +
             '<button type="button" class="wanted-toast-link" style="display:none">View downloads →</button>';
         const link = el.querySelector('.wanted-toast-link');
         link.addEventListener('click', () => showDownloadsTab());
+        const details = el.querySelector('.wanted-toast-details');
+        details.addEventListener('click', () => {
+            if (typeof window.openLatestJobDetails === 'function') window.openLatestJobDetails();
+            else showDownloadsTab();
+        });
         const cancel = el.querySelector('.wanted-toast-cancel');
         cancel.addEventListener('click', async () => {
             try {
@@ -95,6 +101,8 @@ function finishWantedToast(message, type, showLink) {
     const el = wantedToast(WANTED_TOAST_ID, message, type);
     const link = el.querySelector('.wanted-toast-link');
     if (link) link.style.display = showLink ? 'inline-block' : 'none';
+    const details = el.querySelector('.wanted-toast-details');
+    if (details) details.style.display = showLink ? 'inline-block' : 'none';
     const cancel = el.querySelector('.wanted-toast-cancel');
     if (cancel) cancel.style.display = 'none';
     setTimeout(() => {

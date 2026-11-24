@@ -45,6 +45,24 @@
 .job-detail-heading { margin-top: 10px; font-weight: 600; color: var(--muted-foreground); }
 .job-details-header h3 { margin: 0; font-size: 18px; }
 .job-details-body { font-size: 13px; line-height: 1.5; color: var(--foreground, #fff); flex: 0 0 auto; }
+/* ---- Enhanced job details ---- */
+.job-details-summary { flex: 0 0 auto; display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 10px; padding: 8px 10px; background: rgba(255,255,255,0.03); border: 1px solid var(--border, #444); border-radius: 5px; font-size: 12px; }
+.job-progress { flex: 1 1 160px; height: 8px; background: rgba(255,255,255,0.1); border-radius: 4px; overflow: hidden; min-width: 100px; }
+.job-progress-fill { height: 100%; width: 0; background: #10b981; transition: width 0.3s ease; }
+.job-progress-label, .job-elapsed, .job-attempt-summary { color: var(--muted-foreground); white-space: nowrap; }
+.job-stuck-warning { flex: 1 1 100%; color: #fbbf24; font-weight: 600; }
+.log-filter-controls { flex: 0 0 auto; display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.log-filter-text { flex: 1; background: rgba(0,0,0,0.3); border: 1px solid var(--border, #444); border-radius: 4px; color: var(--foreground, #fff); padding: 4px 8px; font-size: 12px; }
+.log-filter-check { font-size: 12px; color: var(--muted-foreground); white-space: nowrap; display: flex; align-items: center; gap: 4px; }
+.log-status-bad { color: #f87171; font-weight: 600; }
+.log-status-good { color: #10b981; font-weight: 600; }
+.log-status-info { color: var(--foreground, #fff); }
+.job-log-entry-copy { float: right; background: transparent; border: 1px solid var(--border, #444); color: var(--muted-foreground); border-radius: 4px; padding: 1px 6px; font-size: 11px; cursor: pointer; opacity: 0; transition: opacity 0.15s; }
+.job-log-entry:hover .job-log-entry-copy { opacity: 1; }
+.job-log-entry-copy:hover { color: var(--foreground, #fff); background: rgba(255,255,255,0.08); }
+.log-attempts { margin-top: 6px; }
+.log-attempts summary { cursor: pointer; color: var(--muted-foreground); font-size: 12px; padding: 2px 0; }
+.log-attempts summary:hover { color: var(--foreground, #fff); }
 .job-details-body ul { margin: 6px 0 0 1.2em; padding: 0; }
 .job-details-body li { margin-bottom: 6px; }
 .job-details-log { margin-top: 8px; padding: 8px 10px; background: rgba(0,0,0,0.35); border: 1px solid var(--border, #444); border-radius: 5px; font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 12px; line-height: 1.5; flex: 1 1 auto; min-height: 120px; overflow-y: auto; }
@@ -60,6 +78,8 @@
 .job-details-footer { margin-top: 10px; display: flex; justify-content: flex-end; }
 .wanted-toast-link { margin-left: 10px; background: transparent; border: 1px solid rgba(255,255,255,0.6); color: #fff; border-radius: 4px; padding: 2px 6px; cursor: pointer; font-size: 12px; }
 .wanted-toast-link:hover { background: rgba(255,255,255,0.15); }
+.wanted-toast-details { margin-left: 10px; background: transparent; border: 1px solid rgba(255,255,255,0.6); color: #fff; border-radius: 4px; padding: 2px 6px; cursor: pointer; font-size: 12px; }
+.wanted-toast-details:hover { background: rgba(255,255,255,0.15); }
 .wanted-toast-cancel { margin-left: 10px; background: transparent; border: 1px solid rgba(255,255,255,0.6); color: #fff; border-radius: 4px; padding: 2px 6px; cursor: pointer; font-size: 12px; }
 .wanted-toast-cancel:hover { background: rgba(255,255,255,0.15); }
 </style>

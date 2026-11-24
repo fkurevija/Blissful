@@ -240,6 +240,31 @@ def test_job_queue_cancel_pending_and_running(tmp_path):
     assert removed >= 1
     assert [j['status'] for j in manager.list_jobs()] == []
 
+def test_job_has_timing_fields_and_child_count(tmp_path):
+    class Config:
+        def get_setting(self, key, default=None):
+            return default
+
+    manager = JobManager(Config(), None, str(tmp_path / 'jobs.json'))
+    cleanup, _ = manager.enqueue('cleanup', {'kind': 'cleanup'})
+    assert cleanup.get('started_at') is None
+    assert cleanup.get('finished_at') is None
+
+    manager.enqueue('album', {'artist': 'A', 'album': 'B', 'tracks': []}, parent_id=cleanup['id'])
+    manager.enqueue('album', {'artist': 'C', 'album': 'D', 'tracks': []}, parent_id=cleanup['id'])
+
+    parent = next(j for j in manager.list_jobs() if j['id'] == cleanup['id'])
+    assert parent['child_count'] == 2, parent
+
+    # Started/picked up sets started_at.
+    picked = manager._next_pending()
+    assert picked is not None
+    assert picked['started_at'] is not None
+
+    # Terminal status sets finished_at.
+    manager.update_job(picked['id'], status='succeeded', result={'successful': 1, 'failed': 0})
+    assert manager.get_job(picked['id'])['finished_at'] is not None
+
 
 def test_userscript_injects_token_and_server_url(tmp_path):
     from extend.system_utils import SystemUtils

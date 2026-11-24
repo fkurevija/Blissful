@@ -184,6 +184,8 @@ let detailsPane = null;
 let detailsTimer = null;
 let detailsJobId = null;
 let detailsPlainText = '';
+let detailsMarkdown = '';
+let detailsFilter = { text: '', failuresOnly: false };
 
 function escapeHtml(text) {
     if (text == null) return '';
@@ -192,45 +194,194 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
+function relativeTime(iso) {
+    if (!iso) return '';
+    const t = Date.parse(iso);
+    if (isNaN(t)) return String(iso);
+    const diff = Math.max(0, Date.now() - t);
+    const s = Math.floor(diff / 1000);
+    if (s < 5) return 'just now';
+    if (s < 60) return s + 's ago';
+    const m = Math.floor(s / 60);
+    if (m < 60) return m + 'm ago';
+    const h = Math.floor(m / 60);
+    if (h < 24) return h + 'h ago';
+    return Math.floor(h / 24) + 'd ago';
+}
+
+function durationBetween(startIso, endIso) {
+    if (!startIso || !endIso) return '';
+    const a = Date.parse(startIso), b = Date.parse(endIso);
+    if (isNaN(a) || isNaN(b) || b < a) return '';
+    const secs = Math.floor((b - a) / 1000);
+    if (secs < 60) return secs + 's';
+    const m = Math.floor(secs / 60);
+    if (m < 60) return m + 'm ' + (secs % 60) + 's';
+    return Math.floor(m / 60) + 'h ' + (m % 60) + 'm';
+}
+
+function copyText(text, button) {
+    const mark = () => {
+        if (button) {
+            const original = button.dataset.originalLabel || button.textContent;
+            button.dataset.originalLabel = original;
+            button.textContent = 'Copied';
+            setTimeout(() => { button.textContent = original; }, 1200);
+        }
+    };
+    if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text).then(mark).catch(() => fallbackCopy(text, mark, button));
+    } else {
+        fallbackCopy(text, mark, button);
+    }
+}
+
+function fallbackCopy(text, mark, button) {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.cssText = 'position:fixed;top:0;left:0;width:1px;height:1px;opacity:0';
+    document.body.appendChild(ta);
+    ta.focus(); ta.select(); ta.setSelectionRange(0, ta.value.length);
+    try {
+        if (document.execCommand('copy')) mark();
+        else if (button) {
+            const original = button.dataset.originalLabel || button.textContent;
+            button.dataset.originalLabel = original;
+            button.textContent = 'Select + Ctrl+C';
+            setTimeout(() => { button.textContent = original; }, 1800);
+        }
+    } catch (e) {}
+    document.body.removeChild(ta);
+}
+
 function closeJobDetails() {
     if (detailsTimer) { clearInterval(detailsTimer); detailsTimer = null; }
     detailsJobId = null;
     if (detailsPane) detailsPane.style.display = 'none';
 }
 
+function providerOf(source) {
+    const s = String(source || '').toLowerCase();
+    if (s.includes('site:music.youtube.com')) return 'YouTube Music';
+    if (s.startsWith('ytsearch') || s.includes('youtube')) return 'YouTube';
+    if (s.startsWith('scsearch') || s.includes('soundcloud')) return 'SoundCloud';
+    if (s.startsWith('bandcamp') || s.includes('bandcamp')) return 'Bandcamp';
+    if (s.startsWith('dzsearch') || s.includes('deezer')) return 'Deezer';
+    if (s.includes('apple')) return 'Apple Music';
+    if (s.includes('mixcloud')) return 'Mixcloud';
+    if (s.includes('archive.org')) return 'Archive.org';
+    if (s.includes('tidal')) return 'Tidal';
+    return 'Source';
+}
+
+function friendlySource(source) {
+    const s = String(source || '');
+    const label = providerOf(s);
+    const query = s.replace(/^(ytsearch\d*|scsearch\d*|dzsearch\d*|bandcamp):/i, '').trim();
+    return query ? label + ': ' + query : label;
+}
+
+function statusClass(status) {
+    const s = String(status || '').toLowerCase();
+    if (s === 'rejected' || s === 'failed' || s === 'error') return 'log-status-bad';
+    if (s === 'success' || s === 'succeeded' || s === 'downloaded') return 'log-status-good';
+    return 'log-status-info';
+}
+
 function renderJobDetails(job) {
     if (!detailsPane || !job) return;
     const body = detailsPane.querySelector('.job-details-body');
     const result = job.result || {};
-    const failures = result.failures || [];
+    const failures = Array.isArray(result.failures) ? result.failures : [];
     const progress = job.progress || {};
+    const log = Array.isArray(job.log) ? job.log : [];
+    const isLive = job.status === 'pending' || job.status === 'running';
+
+    // ---- Summary bar: progress, elapsed time, attempt summary, stuck warning ----
+    let summary = detailsPane.querySelector('.job-details-summary');
+    if (!summary) {
+        summary = document.createElement('div');
+        summary.className = 'job-details-summary';
+        detailsPane.insertBefore(summary, body);
+    }
+    summary.innerHTML = '';
+    const cur = progress.current_track || 0;
+    const tot = progress.total_tracks || 0;
+    if (tot > 0) {
+        const bar = document.createElement('div');
+        bar.className = 'job-progress';
+        const fill = document.createElement('div');
+        fill.className = 'job-progress-fill';
+        fill.style.width = Math.min(100, Math.round((cur / tot) * 100)) + '%';
+        bar.appendChild(fill);
+        summary.appendChild(bar);
+        const label = document.createElement('span');
+        label.className = 'job-progress-label';
+        label.textContent = `${cur}/${tot} tracks`;
+        summary.appendChild(label);
+    }
+    const elapsed = job.started_at
+        ? durationBetween(job.started_at, job.finished_at || (isLive ? new Date().toISOString() : job.updated_at))
+        : durationBetween(job.created_at, job.finished_at || (isLive ? new Date().toISOString() : job.updated_at));
+    if (elapsed) {
+        const el = document.createElement('span');
+        el.className = 'job-elapsed';
+        el.textContent = '⏱ ' + elapsed;
+        summary.appendChild(el);
+    }
+    // Attempt summary derived from log entries
+    const providers = new Set();
+    let ok = 0, bad = 0;
+    log.forEach(item => {
+        if (!item || typeof item !== 'object') return;
+        (item.attempts || []).forEach(a => {
+            providers.add(providerOf(a.source));
+            if ((a.status || '').toLowerCase() === 'success') ok++; else bad++;
+        });
+    });
+    if (providers.size || ok || bad) {
+        const s = document.createElement('span');
+        s.className = 'job-attempt-summary';
+        const bits = [];
+        bits.push(`${providers.size} source${providers.size === 1 ? '' : 's'} tried`);
+        if (ok) bits.push(`${ok} success`);
+        if (bad) bits.push(`${bad} failed/rejected`);
+        s.textContent = bits.join(' · ');
+        summary.appendChild(s);
+    }
+    // Stuck warning: running with no update for ~5 minutes
+    if (isLive && job.updated_at && (Date.now() - Date.parse(job.updated_at)) > 5 * 60 * 1000) {
+        const warn = document.createElement('div');
+        warn.className = 'job-stuck-warning';
+        warn.textContent = '⚠ No progress for over 5 minutes — this job may be stuck.';
+        summary.appendChild(warn);
+    }
+
+    // ---- Job info fields ----
     const fields = [];
     const add = (label, value) => {
-        if (value !== undefined && value !== null && value !== '') {
-            fields.push({ label, text: String(value) });
-        }
+        if (value !== undefined && value !== null && value !== '') fields.push({ label, text: String(value) });
     };
     add('Job', jobLabel(job));
     add('Status', job.status);
+    if (job.parent_id) {
+        add('Part of', 'Parent job ' + job.parent_id);
+    } else if (job.child_count) {
+        add('Includes', `${job.child_count} import job${job.child_count === 1 ? '' : 's'}`);
+    }
     add('Source', job.source || '');
-    add('Updated', job.updated_at || '');
+    add('Updated', relativeTime(job.updated_at));
+    if (job.created_at) add('Created', relativeTime(job.created_at));
+    if (job.finished_at) add('Duration', durationBetween(job.started_at || job.created_at, job.finished_at));
     add('Failure reason', job.failure_reason || '');
     add('Phase', progress.phase || '');
     add('Album', progress.album_title || '');
-    if (progress.processed !== undefined && progress.total) {
-        add('Progress', `${progress.processed}/${progress.total}`);
-    }
-    if (progress.current_track && progress.total_tracks) {
-        add('Track', `${progress.current_track}/${progress.total_tracks}`);
-    }
+    if (progress.processed !== undefined && progress.total) add('Progress', `${progress.processed}/${progress.total}`);
+    if (cur && tot) add('Track', `${cur}/${tot}`);
     add('Lidarr', progress.command_status || '');
     if (result.successful !== undefined) add('Imported', result.successful);
     if (result.failed !== undefined) add('Failed', result.failed);
     if (result.total_tracks !== undefined) add('Total tracks', result.total_tracks);
-
-    // Original structure: job info at the top as bold-label lines, then
-    // a separate fixed-size scrollable log pane below it.
-    const log = Array.isArray(job.log) ? job.log : [];
 
     body.innerHTML = '';
     if (!fields.length && !log.length) {
@@ -242,12 +393,12 @@ function renderJobDetails(job) {
             line.innerHTML = `<strong>${escapeHtml(f.label)}:</strong> ${escapeHtml(f.text)}`;
             body.appendChild(line);
         });
-        if (result.failures && result.failures.length) {
+        if (failures.length) {
             const head = document.createElement('div');
             head.className = 'job-detail-line job-detail-heading';
-            head.textContent = `Per-track failures (${result.failures.length}):`;
+            head.textContent = `Per-track failures (${failures.length}):`;
             body.appendChild(head);
-            result.failures.forEach(f => {
+            failures.forEach(f => {
                 const attempts = Array.isArray(f.attempts)
                     ? f.attempts.map(a => `${a.source || ''}: ${a.error || a.message || ''}`)
                     : [];
@@ -264,21 +415,54 @@ function renderJobDetails(job) {
             });
         }
     }
-    // The log lives in its own HTML pane with a fixed height; the
-    // scrollbar grows as lines are appended.
-    let logPane = detailsPane.querySelector('.job-details-log');
-    if (!logPane) {
-        logPane = document.createElement('div');
-        logPane.className = 'job-details-log';
+
+    // ---- Log pane ----
+    let logWrap = detailsPane.querySelector('.job-details-log-wrap');
+    if (!logWrap) {
+        logWrap = document.createElement('div');
+        logWrap.className = 'job-details-log-wrap';
         const label = document.createElement('div');
         label.className = 'job-detail-heading';
         label.textContent = 'Live log:';
-        detailsPane.insertBefore(label, detailsPane.querySelector('.job-details-footer'));
-        detailsPane.insertBefore(logPane, detailsPane.querySelector('.job-details-footer'));
+        logWrap.appendChild(label);
+        const controls = document.createElement('div');
+        controls.className = 'log-filter-controls';
+        const text = document.createElement('input');
+        text.type = 'text';
+        text.placeholder = 'Filter log…';
+        text.className = 'log-filter-text';
+        text.addEventListener('input', () => {
+            detailsFilter.text = text.value.toLowerCase();
+            renderLogEntries();
+        });
+        const cb = document.createElement('label');
+        cb.className = 'log-filter-check';
+        const cbInput = document.createElement('input');
+        cbInput.type = 'checkbox';
+        cbInput.addEventListener('change', () => {
+            detailsFilter.failuresOnly = cbInput.checked;
+            renderLogEntries();
+        });
+        cb.appendChild(cbInput);
+        cb.appendChild(document.createTextNode(' attempts/failures only'));
+        controls.appendChild(text);
+        controls.appendChild(cb);
+        logWrap.appendChild(controls);
+        const pane = document.createElement('div');
+        pane.className = 'job-details-log';
+        logWrap.appendChild(pane);
+        detailsPane.insertBefore(logWrap, detailsPane.querySelector('.job-details-footer'));
+        detailsPane._logPane = pane;
     }
+    const logPane = detailsPane._logPane;
     const wasAtBottom = !logPane.dataset.init ||
         (logPane.scrollHeight - logPane.scrollTop - logPane.clientHeight) < 24;
-    logPane.innerHTML = '';
+
+    const textRow = text => {
+        const span = document.createElement('span');
+        span.textContent = text;
+        return span;
+    };
     const chip = text => {
         const span = document.createElement('span');
         span.className = 'log-chip';
@@ -298,69 +482,51 @@ function renderJobDetails(job) {
         row.appendChild(body);
         return row;
     };
-    const textRow = text => {
-        const span = document.createElement('span');
-        span.textContent = text;
-        return span;
-    };
-    const meta = (parts) => {
+    const meta = parts => {
         const frag = document.createDocumentFragment();
         frag.appendChild(textRow(' ('));
         parts.forEach((part, i) => {
             if (i) frag.appendChild(textRow(' , '));
-            if (typeof part === 'string') {
-                frag.appendChild(chip(part));
-            } else {
-                frag.appendChild(textRow(part.text || ''));
-            }
+            frag.appendChild(typeof part === 'string' ? chip(part) : textRow(part.text || ''));
         });
         frag.appendChild(textRow(' )'));
         return frag;
     };
-    const friendlySource = source => {
-        const s = String(source || '');
-        const lower = s.toLowerCase();
-        let label = 'Source';
-        if (lower.includes('site:music.youtube.com')) label = 'YouTube Music';
-        else if (lower.startsWith('ytsearch') || lower.includes('youtube')) label = 'YouTube';
-        else if (lower.startsWith('scsearch') || lower.includes('soundcloud')) label = 'SoundCloud';
-        else if (lower.startsWith('bandcamp') || lower.includes('bandcamp')) label = 'Bandcamp';
-        else if (lower.startsWith('dzsearch') || lower.includes('deezer')) label = 'Deezer';
-        else if (lower.includes('apple')) label = 'Apple Music';
-        else if (lower.includes('mixcloud')) label = 'Mixcloud';
-        else if (lower.includes('archive.org')) label = 'Archive.org';
-        else if (lower.includes('tidal')) label = 'Tidal';
-        const query = s.replace(/^(ytsearch\d*|scsearch\d*|dzsearch\d*|bandcamp):/i, '').trim();
-        return query ? label + ': ' + query : label;
-    };
-    const provider = source => {
-        const s = String(source || '').toLowerCase();
-        if (s.includes('site:music.youtube.com')) return 'YouTube Music';
-        if (s.startsWith('ytsearch') || s.includes('youtube')) return 'YouTube';
-        if (s.startsWith('scsearch') || s.includes('soundcloud')) return 'SoundCloud';
-        if (s.startsWith('bandcamp') || s.includes('bandcamp')) return 'Bandcamp';
-        if (s.startsWith('dzsearch') || s.includes('deezer')) return 'Deezer';
-        if (s.includes('apple')) return 'Apple Music';
-        if (s.includes('mixcloud')) return 'Mixcloud';
-        if (s.includes('archive.org')) return 'Archive.org';
-        if (s.includes('tidal')) return 'Tidal';
-        return 'Source';
-    };
-    log.forEach(item => {
+
+    function entryMatchesFilter(item) {
+        if (detailsFilter.failuresOnly) {
+            const hasAttempts = item && typeof item === 'object' && Array.isArray(item.attempts) && item.attempts.length;
+            const isFailure = item && typeof item === 'object' &&
+                /fail|reject|error/i.test(String(item.phase || '') + ' ' + String(item.failure_reason || ''));
+            if (!hasAttempts && !isFailure) return false;
+        }
+        if (!detailsFilter.text) return true;
+        return String(JSON.stringify(item)).toLowerCase().includes(detailsFilter.text);
+    }
+
+    function buildEntry(item) {
         const entry = document.createElement('div');
         entry.className = 'job-log-entry';
-        if (typeof item !== 'object' || item === null) {
+        if (!item || typeof item !== 'object') {
             entry.textContent = String(item);
-            logPane.appendChild(entry);
-            return;
+            return entry;
         }
         const header = document.createElement('div');
         header.className = 'log-snapshot-title';
         header.appendChild(textRow('Job Snapshot '));
         header.appendChild(chip(item.ts || ''));
+        const copyBtn = document.createElement('button');
+        copyBtn.type = 'button';
+        copyBtn.className = 'job-log-entry-copy';
+        copyBtn.textContent = 'Copy';
+        copyBtn.title = 'Copy this log entry';
+        copyBtn.addEventListener('click', e => {
+            e.stopPropagation();
+            copyText(entry.dataset.plain || '', copyBtn);
+        });
+        header.appendChild(copyBtn);
         entry.appendChild(header);
 
-        // Phase / Status with parenthetical status metadata.
         const statusParts = [];
         if (item.job_status) statusParts.push('job_status=' + item.job_status);
         if (item.download_status) statusParts.push('download_status=' + item.download_status);
@@ -386,7 +552,7 @@ function renderJobDetails(job) {
             if (item.album_id !== undefined) albumParts.push('album_id=' + item.album_id);
             if (item.album_index !== undefined) {
                 const total = item.total_albums !== undefined ? item.total_albums : '?';
-                albumParts.push({ text: 'album_index=' + item.album_index + ' of ' + total });
+                albumParts.push({ text: `album_index=${item.album_index} of ${total}` });
             }
             if (albumParts.length) frag.appendChild(meta(albumParts));
             entry.appendChild(bullet(frag));
@@ -395,12 +561,10 @@ function renderJobDetails(job) {
             const frag = document.createDocumentFragment();
             frag.appendChild(textRow('Track: '));
             frag.appendChild(textRow(String(item.download_track)));
-            const trackParts = [];
             if (item.current_track !== undefined) {
                 const total = item.total_tracks !== undefined ? item.total_tracks : '?';
-                trackParts.push({ text: 'current_track=' + item.current_track + ' of ' + total });
+                frag.appendChild(meta([{ text: `current_track=${item.current_track} of ${total}` }]));
             }
-            if (trackParts.length) frag.appendChild(meta(trackParts));
             entry.appendChild(bullet(frag));
         }
         if (item.download_source) {
@@ -410,37 +574,38 @@ function renderJobDetails(job) {
             frag.appendChild(chip(friendlySource(item.download_source)));
             entry.appendChild(bullet(frag));
         }
-        const attempts = Array.isArray(item.attempts) ? item.attempts : [];
+        const attempts = Array.isArray(item.download_attempts) ? item.download_attempts : Array.isArray(item.attempts) ? item.attempts : [];
         if (attempts.length) {
             const heading = document.createElement('div');
             heading.className = 'log-section-title';
             heading.textContent = 'Download Attempts';
             entry.appendChild(heading);
-            attempts.forEach(attempt => {
+            const details = document.createElement('details');
+            details.className = 'log-attempts';
+            const summary = document.createElement('summary');
+            summary.textContent = `${attempts.length} attempt${attempts.length === 1 ? '' : 's'} — click to expand`;
+            details.appendChild(summary);
+            attempts.forEach(a => {
                 const frag = document.createDocumentFragment();
-                const src = attempt.source || '';
-                frag.appendChild(textRow(provider(src) + ' ('));
-                frag.appendChild(chip(friendlySource(src)));
+                frag.appendChild(textRow(providerOf(a.source) + ' ('));
+                frag.appendChild(chip(friendlySource(a.source)));
                 frag.appendChild(textRow('): '));
-                frag.appendChild(textRow(String(attempt.status || '')));
+                const st = document.createElement('span');
+                st.className = statusClass(a.status);
+                st.textContent = String(a.status || '');
+                frag.appendChild(st);
                 frag.appendChild(textRow(' — '));
-                frag.appendChild(textRow(String(attempt.reason || attempt.error || '')));
-                entry.appendChild(bullet(frag));
+                frag.appendChild(textRow(String(a.reason || a.error || '')));
+                details.appendChild(bullet(frag));
             });
+            entry.appendChild(details);
         }
-        logPane.appendChild(entry);
-    });
-    if (!log.length) {
-        logPane.textContent = '(waiting for log entries…)';
+        entry.dataset.plain = entryPlainText(item);
+        return entry;
     }
-    logPane.dataset.init = '1';
-    // Only autoscroll when the user was already at the bottom (or on the
-    // first render). If they scrolled up to read older entries, leave
-    // their scroll position alone until they scroll back down.
-    if (wasAtBottom) logPane.scrollTop = logPane.scrollHeight;
-    // Keep the plain log text for the Copy logs button.
-    detailsPlainText = log.map(item => {
-        if (typeof item !== 'object' || item === null) return String(item);
+
+    function entryPlainText(item) {
+        if (!item || typeof item !== 'object') return String(item);
         const lines = [`Job Snapshot ( ${item.ts || ''} )`];
         const status = [];
         if (item.job_status) status.push('job_status=' + item.job_status);
@@ -461,29 +626,42 @@ function renderJobDetails(job) {
             lines.push(line);
         }
         if (item.download_source) lines.push(`○ Current Source:\n    ${friendlySource(item.download_source)}`);
-        const attempts = Array.isArray(item.attempts) ? item.attempts : [];
+        const attempts = Array.isArray(item.download_attempts) ? item.download_attempts : Array.isArray(item.attempts) ? item.attempts : [];
         if (attempts.length) {
             lines.push('', 'Download Attempts', '');
             attempts.forEach(a => {
-                const src = a.source || '';
-                const s = src.toLowerCase();
-                let label = 'Source';
-                if (s.includes('site:music.youtube.com')) label = 'YouTube Music';
-                else if (s.startsWith('ytsearch') || s.includes('youtube')) label = 'YouTube';
-                else if (s.startsWith('scsearch') || s.includes('soundcloud')) label = 'SoundCloud';
-                else if (s.startsWith('bandcamp') || s.includes('bandcamp')) label = 'Bandcamp';
-                lines.push(`○ ${label} ( ${friendlySource(src)} ): ${a.status || ''} — ${a.reason || a.error || ''}`);
+                lines.push(`○ ${providerOf(a.source)} ( ${friendlySource(a.source)} ): ${a.status || ''} — ${a.reason || a.error || ''}`);
             });
         }
         return lines.join('\n');
-    }).join('\n\n');
-    const live = job.status === 'pending' || job.status === 'running';
+    }
+
+    function renderLogEntries() {
+        logPane.innerHTML = '';
+        let shown = 0;
+        log.forEach(item => {
+            if (!entryMatchesFilter(item)) return;
+            logPane.appendChild(buildEntry(item));
+            shown++;
+        });
+        if (!shown) logPane.textContent = log.length ? '(no entries match the filter)' : '(waiting for log entries…)';
+        logPane.dataset.init = '1';
+        if (wasAtBottom) logPane.scrollTop = logPane.scrollHeight;
+    }
+
+    renderLogEntries();
+    detailsPlainText = log.map(item => entryPlainText(item)).join('\n\n');
+    detailsMarkdown = '# Job: ' + jobLabel(job) + '\n\n' +
+        '- Status: ' + (job.status || '') + '\n' +
+        '- Source: ' + (job.source || '') + '\n' +
+        (job.failure_reason ? '- Failure: ' + job.failure_reason + '\n' : '') +
+        '\n## Log\n\n```\n' + detailsPlainText + '\n```';
     const badge = detailsPane.querySelector('.job-details-live');
-    if (badge) badge.style.display = live ? 'inline' : 'none';
+    if (badge) badge.style.display = isLive ? 'inline' : 'none';
 }
+
 async function refreshJobDetails() {
     if (!detailsJobId) return;
-    // Do not wipe a selection the user is copying from the pane.
     const sel = window.getSelection();
     if (sel && sel.toString() && detailsPane && detailsPane.contains(sel.anchorNode)) return;
     try {
@@ -493,9 +671,7 @@ async function refreshJobDetails() {
         if (job) renderJobDetails(job);
         const live = job && (job.status === 'pending' || job.status === 'running');
         if (!live && detailsTimer) { clearInterval(detailsTimer); detailsTimer = null; }
-    } catch (e) {
-        // best-effort live refresh
-    }
+    } catch (e) {}
 }
 
 function showJobDetails(jobId) {
@@ -507,43 +683,21 @@ function showJobDetails(jobId) {
                 <h3>Job details <span class="job-details-live" style="display:none;color:#10b981;font-size:12px">● live</span></h3>
                 <button type="button" class="btn btn-secondary job-details-close">Close</button>
             </div>
+            <div class="job-details-summary"></div>
             <div class="job-details-body"></div>
             <div class="job-details-footer">
+                <button type="button" class="btn btn-secondary job-details-copy-md">Copy Markdown</button>
                 <button type="button" class="btn btn-secondary job-details-copy">Copy logs</button>
             </div>
         `;
         pane.querySelector('.job-details-close').addEventListener('click', closeJobDetails);
-        pane.querySelector('.job-details-copy').addEventListener('click', async () => {
-            const copy = pane.querySelector('.job-details-copy');
-            const markCopied = () => {
-                if (copy) { copy.textContent = 'Copied'; setTimeout(() => copy.textContent = 'Copy logs', 1200); }
-            };
-            // navigator.clipboard needs a secure context (HTTPS/localhost);
-            // Blissful is usually plain HTTP, so fall back to execCommand.
-            try {
-                if (navigator.clipboard && window.isSecureContext) {
-                    await navigator.clipboard.writeText(detailsPlainText);
-                    markCopied();
-                    return;
-                }
-            } catch (e) {}
-            const ta = document.createElement('textarea');
-            ta.value = detailsPlainText;
-            ta.style.cssText = 'position:fixed;top:0;left:0;width:1px;height:1px;opacity:0';
-            document.body.appendChild(ta);
-            ta.focus();
-            ta.select();
-            ta.setSelectionRange(0, ta.value.length);
-            try {
-                if (document.execCommand('copy')) markCopied();
-                else if (copy) { copy.textContent = 'Select + Ctrl+C'; setTimeout(() => copy.textContent = 'Copy logs', 1800); }
-            } catch (e) {
-                if (copy) { copy.textContent = 'Select + Ctrl+C'; setTimeout(() => copy.textContent = 'Copy logs', 1800); }
-            }
-            document.body.removeChild(ta);
-        });
+        pane.querySelector('.job-details-copy').addEventListener('click', e => copyText(detailsPlainText, e.currentTarget));
+        pane.querySelector('.job-details-copy-md').addEventListener('click', e => copyText(detailsMarkdown, e.currentTarget));
         document.getElementById('jobsList').parentElement.appendChild(pane);
         detailsPane = pane;
+        document.addEventListener('keydown', e => {
+            if (e.key === 'Escape' && detailsPane && detailsPane.style.display === 'flex') closeJobDetails();
+        });
     }
     detailsJobId = jobId;
     renderJobDetails(currentJobs.find(j => j.id === jobId) || { id: jobId, status: 'pending' });
@@ -551,6 +705,20 @@ function showJobDetails(jobId) {
     detailsTimer = setInterval(refreshJobDetails, 1500);
     detailsPane.style.display = 'flex';
 }
+
+// Called by the progress toast's "View details" link.
+async function openLatestJobDetails() {
+    try {
+        const res = await fetch('/api/jobs?limit=50');
+        const data = await res.json();
+        const jobs = (data.jobs || []).filter(j => ['search', 'cleanup'].includes(j.kind));
+        if (jobs.length) showJobDetails(jobs[0].id);
+        else showDownloadsTab();
+    } catch (e) {
+        showDownloadsTab();
+    }
+}
+window.openLatestJobDetails = openLatestJobDetails;
 
 async function loadJobs() {
     try {
