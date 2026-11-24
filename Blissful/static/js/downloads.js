@@ -317,6 +317,22 @@ function renderJobDetails(job) {
         frag.appendChild(textRow(' )'));
         return frag;
     };
+    const friendlySource = source => {
+        const s = String(source || '');
+        const lower = s.toLowerCase();
+        let label = 'Source';
+        if (lower.includes('site:music.youtube.com')) label = 'YouTube Music';
+        else if (lower.startsWith('ytsearch') || lower.includes('youtube')) label = 'YouTube';
+        else if (lower.startsWith('scsearch') || lower.includes('soundcloud')) label = 'SoundCloud';
+        else if (lower.startsWith('bandcamp') || lower.includes('bandcamp')) label = 'Bandcamp';
+        else if (lower.startsWith('dzsearch') || lower.includes('deezer')) label = 'Deezer';
+        else if (lower.includes('apple')) label = 'Apple Music';
+        else if (lower.includes('mixcloud')) label = 'Mixcloud';
+        else if (lower.includes('archive.org')) label = 'Archive.org';
+        else if (lower.includes('tidal')) label = 'Tidal';
+        const query = s.replace(/^(ytsearch\d*|scsearch\d*|dzsearch\d*|bandcamp):/i, '').trim();
+        return query ? label + ': ' + query : label;
+    };
     const provider = source => {
         const s = String(source || '').toLowerCase();
         if (s.includes('site:music.youtube.com')) return 'YouTube Music';
@@ -349,11 +365,11 @@ function renderJobDetails(job) {
         if (item.job_status) statusParts.push('job_status=' + item.job_status);
         if (item.download_status) statusParts.push('download_status=' + item.download_status);
         if (item.download_pending !== undefined) statusParts.push('download_pending=' + item.download_pending);
-        if (statusParts.length) {
+        if (item.phase || statusParts.length) {
             const frag = document.createDocumentFragment();
             frag.appendChild(textRow('Phase / Status: '));
             frag.appendChild(textRow(String(item.phase || '')));
-            frag.appendChild(meta(statusParts));
+            if (statusParts.length) frag.appendChild(meta(statusParts));
             entry.appendChild(bullet(frag));
         }
         if (item.download_artist) {
@@ -391,7 +407,7 @@ function renderJobDetails(job) {
             const frag = document.createDocumentFragment();
             frag.appendChild(textRow('Current Source:'));
             frag.appendChild(document.createElement('br'));
-            frag.appendChild(chip(item.download_source));
+            frag.appendChild(chip(friendlySource(item.download_source)));
             entry.appendChild(bullet(frag));
         }
         const attempts = Array.isArray(item.attempts) ? item.attempts : [];
@@ -404,7 +420,7 @@ function renderJobDetails(job) {
                 const frag = document.createDocumentFragment();
                 const src = attempt.source || '';
                 frag.appendChild(textRow(provider(src) + ' ('));
-                frag.appendChild(chip(src));
+                frag.appendChild(chip(friendlySource(src)));
                 frag.appendChild(textRow('): '));
                 frag.appendChild(textRow(String(attempt.status || '')));
                 frag.appendChild(textRow(' — '));
@@ -444,7 +460,7 @@ function renderJobDetails(job) {
             if (item.current_track !== undefined) line += ` ( current_track=${item.current_track} of ${item.total_tracks} )`;
             lines.push(line);
         }
-        if (item.download_source) lines.push(`○ Current Source:\n    ${item.download_source}`);
+        if (item.download_source) lines.push(`○ Current Source:\n    ${friendlySource(item.download_source)}`);
         const attempts = Array.isArray(item.attempts) ? item.attempts : [];
         if (attempts.length) {
             lines.push('', 'Download Attempts', '');
@@ -456,7 +472,7 @@ function renderJobDetails(job) {
                 else if (s.startsWith('ytsearch') || s.includes('youtube')) label = 'YouTube';
                 else if (s.startsWith('scsearch') || s.includes('soundcloud')) label = 'SoundCloud';
                 else if (s.startsWith('bandcamp') || s.includes('bandcamp')) label = 'Bandcamp';
-                lines.push(`○ ${label} ( ${src} ): ${a.status || ''} — ${a.reason || a.error || ''}`);
+                lines.push(`○ ${label} ( ${friendlySource(src)} ): ${a.status || ''} — ${a.reason || a.error || ''}`);
             });
         }
         return lines.join('\n');
@@ -498,11 +514,33 @@ function showJobDetails(jobId) {
         `;
         pane.querySelector('.job-details-close').addEventListener('click', closeJobDetails);
         pane.querySelector('.job-details-copy').addEventListener('click', async () => {
-            try {
-                await navigator.clipboard.writeText(detailsPlainText);
-                const copy = pane.querySelector('.job-details-copy');
+            const copy = pane.querySelector('.job-details-copy');
+            const markCopied = () => {
                 if (copy) { copy.textContent = 'Copied'; setTimeout(() => copy.textContent = 'Copy logs', 1200); }
+            };
+            // navigator.clipboard needs a secure context (HTTPS/localhost);
+            // Blissful is usually plain HTTP, so fall back to execCommand.
+            try {
+                if (navigator.clipboard && window.isSecureContext) {
+                    await navigator.clipboard.writeText(detailsPlainText);
+                    markCopied();
+                    return;
+                }
             } catch (e) {}
+            const ta = document.createElement('textarea');
+            ta.value = detailsPlainText;
+            ta.style.cssText = 'position:fixed;top:0;left:0;width:1px;height:1px;opacity:0';
+            document.body.appendChild(ta);
+            ta.focus();
+            ta.select();
+            ta.setSelectionRange(0, ta.value.length);
+            try {
+                if (document.execCommand('copy')) markCopied();
+                else if (copy) { copy.textContent = 'Select + Ctrl+C'; setTimeout(() => copy.textContent = 'Copy logs', 1800); }
+            } catch (e) {
+                if (copy) { copy.textContent = 'Select + Ctrl+C'; setTimeout(() => copy.textContent = 'Copy logs', 1800); }
+            }
+            document.body.removeChild(ta);
         });
         document.getElementById('jobsList').parentElement.appendChild(pane);
         detailsPane = pane;

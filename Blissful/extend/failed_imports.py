@@ -490,7 +490,7 @@ class FailedImportsRetry:
                 if downloader is not None and hasattr(downloader,
                                                       'get_download_progress'):
                     snap = downloader.get_download_progress() or {}
-                    for key in ('title', 'artist', 'source', 'status',
+                    for key in ('title', 'artist', 'source', 'status', 'download_index', 'total_tracks',
                                 'attempts', 'pending'):
                         if key in snap:
                             name = 'track' if key == 'title' else key

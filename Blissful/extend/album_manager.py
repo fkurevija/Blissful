@@ -197,7 +197,12 @@ class AlbumManager:
             
             config = self.config_manager.get_config()
             
-            for track in tracks:
+            for track_index, track in enumerate(tracks, 1):
+                try:
+                    self.download_manager._set_download_progress(
+                        download_index=track_index, total_tracks=len(tracks))
+                except Exception:
+                    pass
                 track_result = {
                     'title': track.get('title'),
                     'success': False,

@@ -1198,6 +1198,26 @@ def test_child_jobs_hidden_and_log_mirrored_to_parent(tmp_path):
     assert any(isinstance(line, dict) and line.get('phase') == 'downloaded' for line in parent_log)
 
 
+def test_cleanup_track_and_album_index_advance(tmp_path):
+    """Album and track indices must grow with the run, never stuck at 0.
+
+    Note: this exercises the aggregate callback directly.
+    """
+    from extend.wanted_search import WantedSearchService
+
+    seen = []
+    svc = WantedSearchService.__new__(WantedSearchService)
+    svc._active = {}
+    import threading
+    svc._active_lock = threading.Lock()
+    svc._set_active = lambda **kw: seen.append(kw)
+    hook, state = svc._aggregate_progress_callback(
+        svc, None, 3, 10, 48, 'Artist', 'Album')
+    hook('downloading', download_download_index=7, verified=0)
+    assert seen[-1]['album_index'] == 3
+    assert seen[-1]['current_track'] == 7
+
+
 def test_job_log_entry_is_pretty_printed(tmp_path):
     from extend.job_manager import JobManager
 

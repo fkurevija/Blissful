@@ -1549,7 +1549,11 @@ class WantedSearchService:
 
             verified = details.get('verified') or 0
 
-            current = state['done_before'] + verified
+            download_index = (details.get('download_download_index')
+
+                              or details.get('download_index') or 0)
+
+            current = state['done_before'] + (download_index or verified)
 
             payload = {
 
@@ -1629,6 +1633,12 @@ class WantedSearchService:
                                                 status='running',
 
                                                 progress={'phase': 'scanning'})
+
+                    self.job_manager.append_log(cleanup_job['id'], 'started',
+
+                                                phase='scanning',
+
+                                                source='stale-cleanup')
 
             except Exception:
 
@@ -1749,7 +1759,6 @@ class WantedSearchService:
         progress = {}
         progress_hook = None
         progress_state = {'done_before': 0}
-        index = 0
         total_albums = len(by_album)
 
         # Pre-compute per-album missing counts and the grand total so the
@@ -1766,7 +1775,7 @@ class WantedSearchService:
 
 
 
-        for album_id, records in by_album.items():
+        for index, (album_id, records) in enumerate(by_album.items(), 1):
 
             if self._cancel_event.is_set():
 
