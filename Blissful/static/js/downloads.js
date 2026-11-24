@@ -113,6 +113,7 @@ function renderJobs(jobs) {
             parts.push(`${progress.processed}/${progress.total}`);
         }
         if (progress.command_status) parts.push(`Lidarr: ${progress.command_status}`);
+        const failures = result.failures || [];
         if (job.failure_reason) parts.push(job.failure_reason);
         if (job.status === 'failed' && !failures.length) {
             parts.push('no per-track reasons recorded (older job)');
@@ -122,7 +123,6 @@ function renderJobs(jobs) {
         if (result.total_tracks) parts.push(`${result.total_tracks} total`);
         if (result.command) parts.push(`command ${result.command}`);
         if (result.blissful_fallback) parts.push(`${result.blissful_fallback} Blissful fallback`);
-        const failures = result.failures || [];
         if (failures.length) {
             parts.push(failures.slice(0, 3).map(f =>
                 `${f.title || 'track'}: ${f.error || 'no reason'}`).join('; '));

@@ -1061,3 +1061,13 @@ def test_failed_job_records_per_track_rejection_reason(tmp_path):
     assert 'Rare Demo' in stored['failure_reason']
     assert stored['result']['failures'][0]['error'] == 'Could not find track from any source'
     assert stored['result']['failures'][0]['attempts'][0]['source'].startswith('ytsearch1:')
+
+
+def test_downloads_js_declares_failures_before_use():
+    from pathlib import Path
+
+    js = (Path(__file__).resolve().parents[1] / 'static' / 'js' /
+          'downloads.js').read_text(encoding='utf-8')
+    declaration = js.index('const failures = result.failures')
+    first_use = js.index("job.status === 'failed' && !failures.length")
+    assert declaration < first_use
