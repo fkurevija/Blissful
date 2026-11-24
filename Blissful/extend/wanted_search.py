@@ -1136,6 +1136,19 @@ class WantedSearchService:
 
             total_albums = len(wanted)
 
+            # Grand total missing tracks across all wanted albums, so the
+            # running progress shows cumulative current / grand total.
+            grand_total_tracks = 0
+            for item in wanted:
+                aid = item.get('albumId')
+                if not aid:
+                    continue
+                try:
+                    grand_total_tracks += self._missing_count(
+                        client.get_album_tracks(aid) or [] or [])
+                except Exception:
+                    pass
+
             for index, item in enumerate(wanted, 1):
 
                 aid = item.get('albumId')
@@ -1166,7 +1179,7 @@ class WantedSearchService:
 
                         self, progress, index, total_albums,
 
-                        self._missing_count(tracks) or 1, artist, album_title,
+                        grand_total_tracks or 1, artist, album_title,
 
                     )
 
@@ -1521,9 +1534,21 @@ class WantedSearchService:
 
         progress = {}
         progress_hook = None
+        progress_state = {'done_before': 0}
         index = 0
         total_albums = len(by_album)
-        total_albums = len(by_album)
+
+        # Pre-compute per-album missing counts and the grand total so the
+        # running progress shows cumulative current / grand total
+        # (e.g. 70/100) instead of cumulative current / per-album total
+        # (e.g. 70/1).
+        baseline_cache = {}
+        grand_total_tracks = 0
+        for aid in by_album:
+            baseline = client.get_album_tracks(aid) or []
+            missing = self._missing_count(baseline)
+            baseline_cache[aid] = (baseline, missing)
+            grand_total_tracks += missing
 
 
 
@@ -1543,9 +1568,7 @@ class WantedSearchService:
 
                     continue
 
-                baseline = client.get_album_tracks(album_id) or []
-
-                baseline_missing = self._missing_count(baseline)
+                baseline, baseline_missing = baseline_cache[album_id]
 
                 if baseline_missing == 0:
 
@@ -1569,7 +1592,7 @@ class WantedSearchService:
 
                         self, progress, index, total_albums,
 
-                        baseline_missing or 1, '', title,
+                        grand_total_tracks or 1, '', title,
 
                     )
 

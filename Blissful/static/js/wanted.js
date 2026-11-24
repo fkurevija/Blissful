@@ -110,15 +110,27 @@ async function pollWantedProgress(label) {
                 } else if (active.album) {
                     parts.push(`album #${active.album}`);
                 }
-                for (const key of ['job_status', 'download_track',
-                                   'verified', 'total', 'imported', 'deleted']) {
-                    if (active[key] !== undefined && active[key] !== null && active[key] !== '') {
-                        parts.push(`${key.replace('download_', '')} ${active[key]}`);
-                    }
+                if (active.download_track) parts.push(`track: ${active.download_track}`);
+                if (active.current_track && active.total_tracks) {
+                    parts.push(`progress ${active.current_track}/${active.total_tracks}`);
+                }
+                if (active.imported !== undefined) parts.push(`imported ${active.imported}`);
+                if (active.deleted !== undefined) parts.push(`deleted ${active.deleted}`);
+                if (active.kept !== undefined) parts.push(`kept ${active.kept}`);
+                if (parts.length) detail += ' · ' + parts.join(', ');
+            } else if (active && active.kind === 'search') {
+                detail = active.phase || 'searching';
+                const parts = [];
+                if (active.artist) parts.push(active.artist);
+                if (active.album_title) {
+                    parts.push(`${active.album_title} (#${active.album_id || active.album})`);
+                } else if (active.album) {
+                    parts.push(`album #${active.album}`);
                 }
                 if (active.current_track && active.total_tracks) {
                     parts.push(`track ${active.current_track}/${active.total_tracks}`);
                 }
+                if (active.command_status) parts.push(`Lidarr: ${active.command_status}`);
                 if (parts.length) detail += ' · ' + parts.join(', ');
             }
         } catch (e) {
