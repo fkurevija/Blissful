@@ -8,6 +8,7 @@ are collapsed by a dedupe key so a failing album is not retried forever.
 import json
 import logging
 import threading
+import time
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -34,6 +35,9 @@ class JobManager:
         # Only these kinds are executed by the built-in worker; other kinds
         # (e.g. a long-running API search) are driven by their own service.
         self.managed_kinds = {'album'}
+        # Jobs written by a previous process must never be revived or
+        # deduped into a new run - each run gets a fresh job id.
+        self._started_at = time.time()
         self.jobs = self._load()
 
     # ------------------------------------------------------------------ persistence
@@ -45,7 +49,7 @@ class JobManager:
                     # A worker killed mid-run cannot still be running.
                     for job in data:
                         if job.get('status') == 'running':
-                            job['status'] = 'pending'
+                            job['status'] = 'cancelled'
                             job['failure_reason'] = 'Interrupted by restart'
                     return data
         except Exception as exc:
@@ -68,7 +72,17 @@ class JobManager:
         with self._lock:
             key = dedupe_key or self._dedupe_key(kind, payload)
             for job in self.jobs:
-                if job.get('dedupe_key') == key and job.get('status') not in TERMINAL_STATUSES:
+                if job.get('dedupe_key') != key or job.get('status') in TERMINAL_STATUSES:
+                    continue
+                # Only reuse a job created by this process; a restart
+                # must start a fresh job id rather than revive an orphan.
+                created = job.get('created_at') or ''
+                try:
+                    from datetime import datetime as _dt
+                    created_ts = _dt.fromisoformat(created).timestamp()
+                except Exception:
+                    created_ts = 0
+                if created_ts >= self._started_at:
                     return dict(job), True
 
             job = {

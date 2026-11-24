@@ -359,6 +359,7 @@ class DownloadManager:
                 sources = self._build_source_list(search_query, source_priorities)
             else:
                 sources = [
+                    f"ytsearch1:{search_query} site:music.youtube.com",  # YouTube Music search
                     f"ytsearch1:{search_query}",  # YouTube search
                     f"scsearch1:{search_query}",  # SoundCloud search
                 ]

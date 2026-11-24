@@ -218,6 +218,10 @@ class WantedSearchService:
 
         self._cancel_event = threading.Event()
 
+        # Job ids belonging to the current run, so cancel_active() only
+        # cancels this run's jobs and not an unrelated new job.
+        self._run_job_ids = set()
+
 
 
     # ------------------------------------------------------------ gap fill
@@ -309,6 +313,7 @@ class WantedSearchService:
             return self._search_impl(album_ids=album_ids, apply=apply)
 
         finally:
+            self._run_job_ids.clear()
 
             if self.get_active() is not None:
 
@@ -384,12 +389,8 @@ class WantedSearchService:
 
             try:
 
-                for job in self.job_manager.list_jobs(limit=200, include_children=True):
-
-                    if job.get('status') in ('pending', 'running'):
-
-                        self.job_manager.cancel_job(job['id'])
-
+                for job_id in list(self._run_job_ids):
+                    self.job_manager.cancel_job(job_id)
             except Exception:
 
                 pass
@@ -1161,6 +1162,8 @@ class WantedSearchService:
                     'source': 'wanted-search',
 
                 }, dedupe_key='wanted-search-run-%s' % time.time())
+                if search_job:
+                    self._run_job_ids.add(search_job['id'])
 
                 if search_job:
 
@@ -1627,6 +1630,7 @@ class WantedSearchService:
                     dedupe_key='stale-cleanup-run-%s' % time.time())
 
                 if cleanup_job:
+                    self._run_job_ids.add(cleanup_job['id'])
 
                     self.job_manager.update_job(cleanup_job['id'],
 
@@ -2087,6 +2091,7 @@ class WantedSearchService:
                              'kept', 'skipped', 'errors')}
 
         self._finish_active('completed' if not report['errors'] else 'completed with errors')
+        self._run_job_ids.clear()
 
         if cleanup_job_id:
 

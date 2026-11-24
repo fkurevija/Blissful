@@ -1140,6 +1140,7 @@ def test_cancel_active_stops_run_and_job(tmp_path):
     svc = WantedSearchService(Config(), object(),
                               str(tmp_path / 'state.json'), job_manager=jobs)
     svc._set_active(kind='cleanup', phase='searching')
+    svc._run_job_ids.add(jobs.items[0]['id'])
     assert svc.cancel_active() is True
     assert svc._cancel_event.is_set()
     assert jobs.items[0]['status'] == 'cancelled'
