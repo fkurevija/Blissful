@@ -1172,6 +1172,32 @@ def test_poll_job_stops_on_cancelled_or_missing_job(monkeypatch):
     assert svc._poll_job('j', timeout_s=5)['status'] == 'cancelled'
 
 
+def test_job_records_live_log_on_progress(tmp_path):
+    from extend.job_manager import JobManager
+
+    class Config:
+        def get_setting(self, key, default=None):
+            return default
+
+    class Albums:
+        def download_album(self, **kwargs):
+            return {'success': True}
+
+    manager = JobManager(Config(), Albums(), str(tmp_path / 'jobs.json'))
+    job, _ = manager.enqueue('search', {'album': 'X'})
+    manager.update_job(job['id'], status='running')
+    manager.update_job(job['id'], progress={'phase': 'searching',
+                                             'artist': 'A', 'album_title': 'X'})
+    manager.append_log(job['id'], 'manual entry', verified=3)
+    stored = manager.get_job(job['id'])
+    log = stored['log']
+    assert len(log) >= 3
+    assert any('status: running' in line for line in log)
+    assert any('phase=searching' in line for line in log)
+    assert any('manual entry' in line and 'verified=3' in line for line in log)
+    assert stored['progress']['phase'] == 'searching'
+
+
 def test_failed_job_records_per_track_rejection_reason(tmp_path):
     from extend.job_manager import JobManager
 

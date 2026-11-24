@@ -107,20 +107,12 @@ function renderJobs(jobs) {
         const result = job.result || {};
         const failures = result.failures || [];
         const progress = job.progress || {};
-        const hasDetail = Boolean(
-            job.failure_reason || failures.length ||
-            result.successful !== undefined || result.failed ||
-            result.total_tracks || progress.phase || progress.album_title
-        );
         const btn = document.createElement('button');
         btn.type = 'button';
         btn.className = 'btn btn-secondary job-action job-details';
-        btn.textContent = hasDetail ? 'Details' : '—';
-        btn.disabled = !hasDetail;
+        btn.textContent = 'Details';
         btn.dataset.jobId = job.id;
-        btn.addEventListener('click', () => {
-            if (hasDetail) showJobDetails(job);
-        });
+        btn.addEventListener('click', () => showJobDetails(job.id));
         detail.appendChild(btn);
         row.appendChild(detail);
 
@@ -187,6 +179,8 @@ function renderJobs(jobs) {
 }
 
 let detailsPane = null;
+let detailsTimer = null;
+let detailsJobId = null;
 
 function escapeHtml(text) {
     if (text == null) return '';
@@ -195,23 +189,14 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
-function showJobDetails(job) {
-    if (!detailsPane) {
-        const pane = document.createElement('div');
-        pane.className = 'job-details-pane';
-        pane.innerHTML = `
-            <div class="job-details-header">
-                <h3>Job details</h3>
-                <button type="button" class="btn btn-secondary job-details-close">Close</button>
-            </div>
-            <div class="job-details-body"></div>
-        `;
-        pane.querySelector('.job-details-close').addEventListener('click', () => {
-            pane.style.display = 'none';
-        });
-        document.getElementById('jobsList').parentElement.appendChild(pane);
-        detailsPane = pane;
-    }
+function closeJobDetails() {
+    if (detailsTimer) { clearInterval(detailsTimer); detailsTimer = null; }
+    detailsJobId = null;
+    if (detailsPane) detailsPane.style.display = 'none';
+}
+
+function renderJobDetails(job) {
+    if (!detailsPane || !job) return;
     const body = detailsPane.querySelector('.job-details-body');
     const result = job.result || {};
     const failures = result.failures || [];
@@ -227,12 +212,13 @@ function showJobDetails(job) {
     if (progress.processed !== undefined && progress.total) {
         lines.push(`<strong>Progress:</strong> ${progress.processed}/${progress.total}`);
     }
+    if (progress.current_track && progress.total_tracks) {
+        lines.push(`<strong>Track:</strong> ${progress.current_track}/${progress.total_tracks}`);
+    }
     if (progress.command_status) lines.push(`<strong>Lidarr:</strong> ${escapeHtml(progress.command_status)}`);
     if (result.successful !== undefined) lines.push(`<strong>Imported:</strong> ${result.successful}`);
     if (result.failed !== undefined) lines.push(`<strong>Failed:</strong> ${result.failed}`);
     if (result.total_tracks !== undefined) lines.push(`<strong>Total tracks:</strong> ${result.total_tracks}`);
-    if (result.command !== undefined) lines.push(`<strong>Command:</strong> ${result.command}`);
-    if (result.blissful_fallback !== undefined) lines.push(`<strong>Blissful fallback:</strong> ${result.blissful_fallback}`);
     if (failures.length) {
         lines.push(`<strong>Per-track failures (${failures.length}):</strong>`);
         lines.push('<ul style="margin:6px 0 0 1.2em; padding:0">');
@@ -244,7 +230,54 @@ function showJobDetails(job) {
         });
         lines.push('</ul>');
     }
-    body.innerHTML = lines.join('<br>') || '<em>No details recorded.</em>';
+    const log = Array.isArray(job.log) ? job.log : [];
+    lines.push('<strong>Live log:</strong>');
+    lines.push('<div class="job-details-log"></div>');
+    const html = lines.join('<br>') || '<em>No details recorded.</em>';
+    body.innerHTML = html;
+    const logEl = body.querySelector('.job-details-log');
+    if (logEl) {
+        logEl.textContent = log.length ? log.join('\n') : '(waiting for log entries…)';
+        logEl.scrollTop = logEl.scrollHeight;
+    }
+    const live = job.status === 'pending' || job.status === 'running';
+    const badge = detailsPane.querySelector('.job-details-live');
+    if (badge) badge.style.display = live ? 'inline' : 'none';
+}
+
+async function refreshJobDetails() {
+    if (!detailsJobId) return;
+    try {
+        const res = await fetch('/api/jobs?limit=500');
+        const data = await res.json();
+        const job = (data.jobs || []).find(j => j.id === detailsJobId);
+        if (job) renderJobDetails(job);
+        const live = job && (job.status === 'pending' || job.status === 'running');
+        if (!live && detailsTimer) { clearInterval(detailsTimer); detailsTimer = null; }
+    } catch (e) {
+        // best-effort live refresh
+    }
+}
+
+function showJobDetails(jobId) {
+    if (!detailsPane) {
+        const pane = document.createElement('div');
+        pane.className = 'job-details-pane';
+        pane.innerHTML = `
+            <div class="job-details-header">
+                <h3>Job details <span class="job-details-live" style="display:none;color:#10b981;font-size:12px">● live</span></h3>
+                <button type="button" class="btn btn-secondary job-details-close">Close</button>
+            </div>
+            <div class="job-details-body"></div>
+        `;
+        pane.querySelector('.job-details-close').addEventListener('click', closeJobDetails);
+        document.getElementById('jobsList').parentElement.appendChild(pane);
+        detailsPane = pane;
+    }
+    detailsJobId = jobId;
+    renderJobDetails(currentJobs.find(j => j.id === jobId) || { id: jobId, status: 'pending' });
+    if (detailsTimer) clearInterval(detailsTimer);
+    detailsTimer = setInterval(refreshJobDetails, 1500);
     detailsPane.style.display = 'block';
 }
 

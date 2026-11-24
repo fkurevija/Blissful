@@ -79,6 +79,7 @@ class JobManager:
                 'failure_reason': None,
                 'attempts': 0,
                 'result': None,
+                'log': [],
                 'created_at': _now(),
                 'updated_at': _now(),
             }
@@ -213,11 +214,49 @@ class JobManager:
         if self._thread:
             self._thread.join(timeout=5)
 
+    @staticmethod
+    def _log_line(message, **details):
+        """Format one timestamped, human-readable job log line."""
+        parts = [message]
+        for key in ('phase', 'artist', 'album_title', 'current_track',
+                    'total_tracks', 'processed', 'total', 'verified',
+                    'command_status', 'source', 'status', 'imported',
+                    'deleted', 'kept', 'pending'):
+            value = details.get(key)
+            if value is not None and value != '':
+                parts.append('%s=%s' % (key, value))
+        return '%s  %s' % (datetime.now().strftime('%H:%M:%S'), ' · '.join(parts))
+
+    def append_log(self, job_id, message, **details):
+        """Append a line to a job's live log (bounded to 200 lines)."""
+        with self._lock:
+            for job in self.jobs:
+                if job['id'] == job_id:
+                    log = job.setdefault('log', [])
+                    log.append(self._log_line(message, **details))
+                    del log[:-200]
+                    job['updated_at'] = _now()
+                    self._persist()
+                    return dict(job)
+        return None
+
     def update_job(self, job_id, **changes):
         """Update an externally-managed job (search runs, etc.)."""
         with self._lock:
             for job in self.jobs:
                 if job['id'] == job_id:
+                    # Auto-log progress/status transitions so a running
+                    # job has a live log without callers doing extra work.
+                    progress = changes.get('progress')
+                    if isinstance(progress, dict):
+                        log = job.setdefault('log', [])
+                        message = str(progress.get('phase') or 'progress')
+                        log.append(self._log_line(message, **progress))
+                        del log[:-200]
+                    elif 'status' in changes and changes['status'] != job.get('status'):
+                        log = job.setdefault('log', [])
+                        log.append(self._log_line('status: %s' % changes['status']))
+                        del log[:-200]
                     job.update(changes)
                     job['updated_at'] = _now()
                     self._persist()
@@ -238,6 +277,9 @@ class JobManager:
     def _process(self, job):
         payload = job.get('payload', {})
         logger.info("Processing job %s for %s - %s", job['id'], payload.get('artist'), payload.get('album'))
+        self.append_log(job['id'], 'job started',
+                        artist=payload.get('artist'),
+                        album_title=payload.get('album'))
         try:
             if job.get('kind') == 'album':
                 result = self.album_manager.download_album(
@@ -282,4 +324,6 @@ class JobManager:
                     current['updated_at'] = _now()
                     break
             self._persist()
+        self.append_log(job['id'], 'job finished', status=status,
+                        imported=(result or {}).get('successful') if isinstance(result, dict) else None)
         logger.info("Job %s finished: %s", job['id'], status)
