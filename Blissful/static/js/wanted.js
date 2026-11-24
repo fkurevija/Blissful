@@ -270,7 +270,12 @@ function renderStaleList(items) {
         check.type = 'checkbox';
         check.dataset.recordId = item.id;
         const label = document.createElement('label');
-        label.textContent = `${item.title || 'Album ' + item.albumId} — ${item.errorMessage || 'stale'}`;
+        const name = [item.artist, item.title].filter(Boolean).join(' – ')
+            || item.albumTitle || 'Album ' + item.albumId;
+        label.textContent = `${name} — ${item.errorMessage || 'stale'}`;
+        if (item.downloadTitle && item.downloadTitle !== item.title) {
+            label.title = 'Torrent: ' + item.downloadTitle;
+        }
         row.appendChild(check);
         row.appendChild(label);
         container.appendChild(row);

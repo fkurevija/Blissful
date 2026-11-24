@@ -758,6 +758,30 @@ def test_stale_cleanup_deletes_only_after_import(tmp_path, monkeypatch):
     assert any('already recorded' in str(s) for s in again['skipped'])
 
 
+def test_get_stale_resolves_album_metadata_from_lidarr(tmp_path):
+    """Queue rows carry only albumId; stale list must show artist/album.
+
+    The raw torrent title (often a hash) is kept separately.
+    """
+    class Client:
+        def get_all_queue_records(self, page_size=200):
+            return [{'id': 11, 'albumId': 18768, 'downloadId': 'd1',
+                     'title': '4c492c3fb526923bd80a487a4cf6e1098d951bbf',
+                     'errorMessage': 'qBittorrent is downloading metadata'}]
+
+        def get_album(self, aid):
+            return {'title': 'The Best Of Blue Öyster Cult',
+                    'artist': {'artistName': 'Blue Öyster Cult'}}
+
+    svc = _wanted_service(tmp_path, client=Client())
+    stale = svc.get_stale()
+    assert len(stale) == 1
+    assert stale[0]['artist'] == 'Blue Öyster Cult'
+    assert stale[0]['albumTitle'] == 'The Best Of Blue Öyster Cult'
+    assert stale[0]['title'] == 'The Best Of Blue Öyster Cult'
+    assert stale[0]['downloadTitle'].startswith('4c492c3f')
+
+
 def test_get_stale_only_uses_activity_queue_records(tmp_path):
     """Stale detection must ignore anything that is not a live queue download.
 

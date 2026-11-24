@@ -896,6 +896,56 @@ class WantedSearchService:
 
     # ------------------------------------------------------------------- stale
 
+    def _resolve_stale_album(self, client, album_id, cache):
+
+        """Resolve a queue albumId to (artist, album title) via Lidarr.
+
+
+
+        Activity Queue records carry only IDs, not names. Results are
+
+        cached per call since several queue rows can share one albumId.
+
+        Never raises; returns empty strings on failure.
+
+        """
+
+        if not album_id:
+
+            return '', ''
+
+        key = str(album_id)
+
+        if key in cache:
+
+            return cache[key]
+
+        resolved = ('', '')
+
+        try:
+
+            album = client.get_album(album_id) or {}
+
+            if isinstance(album, dict):
+
+                artist = str((album.get('artist') or {}).get('artistName')
+
+                             or album.get('artistName') or '')
+
+                title = str(album.get('title') or '')
+
+                resolved = (artist, title)
+
+        except Exception:
+
+            pass
+
+        cache[key] = resolved
+
+        return resolved
+
+
+
     def get_stale(self) -> list:
 
         """Return unhealthy downloads from Lidarr's Activity Queue only.
@@ -932,6 +982,8 @@ class WantedSearchService:
 
 
 
+        album_cache = {}
+
         ordered = []
 
         by_download = {}
@@ -956,15 +1008,31 @@ class WantedSearchService:
 
                 continue
 
+            album_id = record.get('albumId')
+
+            artist_name, album_title = self._resolve_stale_album(
+
+                client, album_id, album_cache)
+
             projected = {
 
                 'id': record.get('id'),
 
-                'albumId': record.get('albumId'),
+                'albumId': album_id,
 
                 'downloadId': record.get('downloadId'),
 
-                'title': str(record.get('title') or ''),
+                # Show resolved Lidarr metadata, not the raw torrent title
+
+                # (which is often just a download hash).
+
+                'title': album_title or str(record.get('title') or ''),
+
+                'artist': artist_name,
+
+                'albumTitle': album_title,
+
+                'downloadTitle': str(record.get('title') or ''),
 
                 'errorMessage': str(record.get('errorMessage') or ''),
 
