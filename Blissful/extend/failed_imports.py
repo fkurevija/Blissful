@@ -583,7 +583,7 @@ class FailedImportsRetry:
                 job, _duplicate = self.job_manager.enqueue('album', job_payload, parent_id=parent_id)
             except Exception as exc:
                 entry.update(status='failed',
-                             reason='enqueue error: %s' % str(exc)[:200])
+                             reason='enqueue error: %s' % str(exc))
                 return entry
             job_id = (job or {}).get('id') if isinstance(job, dict) else None
             report_phase('download job queued', tracks=len(payload_tracks),
@@ -599,7 +599,7 @@ class FailedImportsRetry:
                 reason = (finished.get('failure_reason')
                           or finished.get('message')
                           or 'download job did not succeed')
-                entry.update(status='failed', reason=str(reason)[:200])
+                entry.update(status='failed', reason=str(reason))
                 return entry
 
             release_id = self._monitored_release_id(album, tracks)
@@ -642,7 +642,7 @@ class FailedImportsRetry:
             if not accepted:
                 reason = 'all files rejected: ' + '; '.join(
                     '%s (%s)' % (t[:30], why) for t, why in rejected[:5])
-                entry.update(status='failed', reason=reason[:300])
+                entry.update(status='failed', reason=reason)
                 return entry
 
             report_phase('linking tracks with Lidarr', files=len(accepted))
@@ -663,7 +663,7 @@ class FailedImportsRetry:
                     replaceExistingFiles=False)
             except Exception as exc:
                 entry.update(status='failed',
-                             reason='ManualImport error: %s' % str(exc)[:200])
+                             reason='ManualImport error: %s' % str(exc))
                 return entry
             command_id = ((response or {}).get('id')
                           if isinstance(response, dict) else None)
@@ -675,7 +675,7 @@ class FailedImportsRetry:
             if _lower(command_result.get('status')) != 'completed':
                 reason = (command_result.get('message')
                           or 'ManualImport did not complete')
-                entry.update(status='failed', reason=str(reason)[:200])
+                entry.update(status='failed', reason=str(reason))
                 return entry
 
             entry['imported'] = len(files)
@@ -690,7 +690,7 @@ class FailedImportsRetry:
             }
             self._save_state(state)
         except Exception as exc:
-            entry.update(status='failed', reason=str(exc)[:200])
+            entry.update(status='failed', reason=str(exc))
         return entry
 
     # --------------------------------------------------------------------- run

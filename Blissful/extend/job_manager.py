@@ -364,7 +364,7 @@ class JobManager:
             elif failures:
                 reason = '; '.join(
                     f"{item.get('title') or 'track'}: {item.get('error')}"
-                    for item in failures[:3])[:300]
+                    for item in failures[:5])
             else:
                 reason = result.get('error', 'Download failed')
         except Exception as exc:

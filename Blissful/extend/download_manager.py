@@ -265,8 +265,8 @@ class DownloadManager:
         with _DOWNLOAD_PROGRESS_LOCK:
             attempts = list(DOWNLOAD_PROGRESS.get('attempts') or [])
             attempts.append({'source': str(source), 'status': status,
-                             'reason': str(reason or '')[:120]})
-            DOWNLOAD_PROGRESS['attempts'] = attempts[-8:]
+                             'reason': str(reason or '')})
+            DOWNLOAD_PROGRESS['attempts'] = attempts[-30:]
             return dict(DOWNLOAD_PROGRESS)
 
     def reset_download_progress(self):
