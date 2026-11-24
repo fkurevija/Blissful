@@ -223,22 +223,49 @@ class JobManager:
             self._thread.join(timeout=5)
 
     @staticmethod
+    def _log_value(value):
+        """Compact, readable rendering of any detail value for the log."""
+        if isinstance(value, (list, tuple)):
+            return ', '.join(JobManager._log_value(v) for v in value[:8])
+        if isinstance(value, dict):
+            return '{' + ', '.join('%s=%s' % (k, JobManager._log_value(v))
+                                      for k, v in list(value.items())[:8]) + '}'
+        if value is None:
+            return ''
+        text = str(value)
+        return text[:400] if len(text) > 400 else text
+
+    @staticmethod
     def _log_line(message, **details):
-        """Format one timestamped, human-readable job log line."""
+        """Format one timestamped, human-readable job log line.
+
+        Every detail field is included (nothing silently dropped) so the
+        Details pane log is genuinely verbose: source attempts, current
+        track, durations, Lidarr status, reasons, etc.
+        """
         parts = [message]
-        for key in ('phase', 'artist', 'album_title', 'current_track',
-                    'total_tracks', 'processed', 'total', 'verified',
-                    'command_status', 'source', 'status', 'imported',
-                    'deleted', 'kept', 'pending'):
-            value = details.get(key)
-            if value is not None and value != '':
-                parts.append('%s=%s' % (key, value))
+        for key, value in details.items():
+            if value is None or value == '' or key == 'phase':
+                continue
+            rendered = JobManager._log_value(value)
+            if rendered:
+                parts.append('%s=%s' % (key, rendered))
         return '%s  %s' % (datetime.now().strftime('%H:%M:%S'), ' · '.join(parts))
 
     def _append_log_locked(self, job, message, **details):
-        """Append a log line to a job and mirror it to its parent run."""
+        """Append a log line to a job and mirror it to its parent run.
+
+        Consecutive identical lines (ignoring the timestamp) are skipped
+        so a 2-second poll does not fill the log with duplicates.
+        """
         line = self._log_line(message, **details)
         log = job.setdefault('log', [])
+        body = line[9:] if len(line) > 9 and line[8] == ' ' else line
+        if log:
+            last = log[-1]
+            last_body = last[9:] if len(last) > 9 and last[8] == ' ' else last
+            if last_body == body:
+                return
         log.append(line)
         del log[:-200]
         parent_id = job.get('parent_id')
@@ -275,6 +302,9 @@ class JobManager:
                         self._append_log_locked(job, message, **progress)
                     elif 'status' in changes and changes['status'] != job.get('status'):
                         self._append_log_locked(job, 'status: %s' % changes['status'])
+                    if changes.get('failure_reason'):
+                        self._append_log_locked(job, 'failure',
+                                                failure_reason=changes['failure_reason'])
                     job.update(changes)
                     job['updated_at'] = _now()
                     self._persist()
@@ -343,5 +373,7 @@ class JobManager:
                     break
             self._persist()
         self.append_log(job['id'], 'job finished', status=status,
-                        imported=(result or {}).get('successful') if isinstance(result, dict) else None)
+                        imported=(result or {}).get('successful') if isinstance(result, dict) else None,
+                        failure_reason=reason,
+                        failures=failures[:5])
         logger.info("Job %s finished: %s", job['id'], status)

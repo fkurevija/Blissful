@@ -1195,7 +1195,39 @@ def test_child_jobs_hidden_and_log_mirrored_to_parent(tmp_path):
     manager.update_job(child['id'], progress={'phase': 'downloaded'})
     parent_log = manager.get_job(parent['id'])['log']
     assert any('child phase' in line for line in parent_log)
-    assert any('phase=downloaded' in line for line in parent_log)
+    assert any('downloaded' in line for line in parent_log)
+
+
+def test_job_log_is_verbose_and_deduplicates_polls(tmp_path):
+    from extend.job_manager import JobManager
+
+    class Config:
+        def get_setting(self, key, default=None):
+            return default
+
+    class Albums:
+        def download_album(self, **kwargs):
+            return {'success': True}
+
+    manager = JobManager(Config(), Albums(), str(tmp_path / 'jobs.json'))
+    job, _ = manager.enqueue('album', {'album': 'X'})
+    manager.update_job(job['id'], progress={
+        'phase': 'trying source', 'download_source': 'ytsearch1:artist - track',
+        'download_status': 'trying', 'attempts': [1, 2], 'pending': 3,
+        'failure_reason': 'Duration mismatch'})
+    log = manager.get_job(job['id'])['log']
+    assert len(log) == 1
+    joined = log[0]
+    assert 'download_source=ytsearch1:artist - track' in joined
+    assert 'download_status=trying' in joined
+    assert 'attempts=1, 2' in joined
+    assert 'failure_reason=Duration mismatch' in joined
+    # Identical consecutive poll lines are skipped.
+    manager.update_job(job['id'], progress={
+        'phase': 'trying source', 'download_source': 'ytsearch1:artist - track',
+        'download_status': 'trying', 'attempts': [1, 2], 'pending': 3,
+        'failure_reason': 'Duration mismatch'})
+    assert len(manager.get_job(job['id'])['log']) == 1
 
 
 def test_job_records_live_log_on_progress(tmp_path):
@@ -1219,7 +1251,7 @@ def test_job_records_live_log_on_progress(tmp_path):
     log = stored['log']
     assert len(log) >= 3
     assert any('status: running' in line for line in log)
-    assert any('phase=searching' in line for line in log)
+    assert any('searching' in line for line in log)
     assert any('manual entry' in line and 'verified=3' in line for line in log)
     assert stored['progress']['phase'] == 'searching'
 
