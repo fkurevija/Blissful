@@ -414,10 +414,10 @@ Manual configuration file:
     "/app/downloads": "/music"
   },
   "source_priorities": [
-    "soundcloud",
-    "youtube-music",
-    "youtube",
-    "bandcamp"
+    {"name": "YouTube Music", "search": "music.youtube.com", "enabled": true},
+    {"name": "SoundCloud", "search": "soundcloud.com", "enabled": true},
+    {"name": "YouTube", "search": "youtube.com", "enabled": true},
+    {"name": "Bandcamp", "search": "bandcamp.com", "enabled": true}
   ]
 }
 ```

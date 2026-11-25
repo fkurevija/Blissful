@@ -1,11 +1,15 @@
 ﻿# 🎵 Blissful - Lidarr Music Downloader
 
-A powerful microservice that automatically downloads missing music tracks for your Lidarr library using YouTube, SoundCloud, and 1000+ other sources.
+A hardened fork of Blissful that keeps Lidarr libraries full: automatic gap-fill from YouTube Music, SoundCloud, YouTube and Bandcamp, with 403 mitigation, wanted-album search, stale-torrent cleanup, failed-import recovery, and an observable job queue.
+
+Blissful is a Flask microservice that fills missing tracks in a Lidarr library by searching configurable sources (YouTube Music, SoundCloud, YouTube and Bandcamp by default; Spotify for metadata only) and importing them with FFmpeg processing and Lidarr-compatible naming. This fork adds what upstream lacks: a self-contained Deno + PO-token runtime that fights YouTube/YouTube Music 403s, a CI-published multi-arch image, a Wanted Search tab with a dry-run-by-default Lidarr-first cascade into Blissful gap-fill, stale-torrent cleanup driven strictly by Lidarr's Activity Queue, native failed-import recovery with duration/tag verification, and persistent job history with live logs, retries, cancellation and failure reasons. Optional bearer-token auth makes it safe to expose beyond a trusted LAN.
 
 ![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)
 ![Python](https://img.shields.io/badge/python-3.8+-green.svg)
 ![License](https://img.shields.io/badge/license-Unlicense-blue.svg)
 ![Docker](https://img.shields.io/badge/docker-build%20from%20source-blue?logo=docker)
+
+> **About this fork:** This project is a fork of [Angablade/Blissful](https://github.com/Angablade/Blissful), created to implement standing roadmap items from the upstream project and add a number of my own desired features. It is maintained independently and is not affiliated with the upstream author.
 
 ---
 
@@ -57,7 +61,12 @@ A powerful microservice that automatically downloads missing music tracks for yo
 - 👥 **Request System** - Let users request artists via Jellyfin/Emby/Plex authentication
 - 🎛️ **Audio Processing** - Normalization, format conversion, metadata embedding
 - 🗺️ **Path Mapping** - Support for remote/Docker Lidarr instances
+- 🔁 **Failed Import Recovery** - Retry unhealthy Lidarr imports with native duration/tag verification
+- 🔎 **Wanted Search** - Search missing albums and clean up stale torrents, dry-run by default
 - 🔍 **Source Priorities** - Configure preferred download sources
+- 🛡️ **403-Resilient Downloads** - Bundled Deno runtime and PO-token sidecar keep YouTube/YouTube Music working
+- 📥 **Persistent Job Queue** - Downloads tab with history, live logs, details, retries and cancellation
+- 🔐 **Optional API Security** - Bearer-token auth and restricted CORS for exposing Blissful beyond a trusted LAN
 
 ---
 
@@ -306,10 +315,10 @@ The `config.json` file stores all your settings:
   "quality": "320k",
   "enable_requests": true,
   "source_priorities": [
-    "soundcloud",
-    "youtube-music",
-    "youtube",
-    "bandcamp"
+    {"name": "YouTube Music", "search": "music.youtube.com", "enabled": true},
+    {"name": "SoundCloud", "search": "soundcloud.com", "enabled": true},
+    {"name": "YouTube", "search": "youtube.com", "enabled": true},
+    {"name": "Bandcamp", "search": "bandcamp.com", "enabled": true}
   ]
 }
 ```
@@ -349,6 +358,10 @@ Need help?
 - 💬 **Questions** - [Open an issue in this fork](https://github.com/fkurevija/Blissful/issues)
 
 ---
+
+## 🤖 AI Disclosure
+
+Portions of this codebase, documentation, or tests were generated or refactored with the assistance of AI tools (e.g. GitHub Copilot, Claude, ChatGPT). All AI-generated outputs have been reviewed, tested, and verified by human maintainers.
 
 ## 📄 License
 
