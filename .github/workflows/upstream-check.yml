@@ -11,7 +11,7 @@ permissions:
 
 env:
   UPSTREAM_URL: https://github.com/Angablade/Blissful.git
-  UPSTREAM_SLUG: Angablade/Blissful
+  UPSTREAM_SLUG: Angablade:Blissful
   UPSTREAM_BRANCH: master
 
 jobs:
