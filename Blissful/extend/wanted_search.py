@@ -52,6 +52,8 @@ Public interface::
 
 import json
 
+import logging
+
 import os
 
 import threading
@@ -59,6 +61,8 @@ import threading
 import time
 
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 
@@ -294,7 +298,7 @@ class WantedSearchService:
 
 
 
-    def search(self, album_ids=None, apply=False) -> dict:
+    def search(self, album_ids=None, apply=False, retry_job_id=None) -> dict:
 
         """Public search entry point; only one run may be active at a time."""
 
@@ -310,7 +314,8 @@ class WantedSearchService:
 
         try:
 
-            return self._search_impl(album_ids=album_ids, apply=apply)
+            return self._search_impl(album_ids=album_ids, apply=apply,
+                                     retry_job_id=retry_job_id)
 
         finally:
             self._run_job_ids.clear()
@@ -325,7 +330,8 @@ class WantedSearchService:
 
 
 
-    def cleanup_stale(self, record_ids=None, apply=False, wait_minutes=10) -> dict:
+    def cleanup_stale(self, record_ids=None, apply=False, wait_minutes=10,
+                      retry_job_id=None) -> dict:
 
         """Public cleanup entry point; only one run may be active at a time."""
 
@@ -343,7 +349,8 @@ class WantedSearchService:
 
             return self._cleanup_impl(record_ids=record_ids, apply=apply,
 
-                                      wait_minutes=wait_minutes)
+                                      wait_minutes=wait_minutes,
+                                      retry_job_id=retry_job_id)
 
         finally:
 
@@ -1067,7 +1074,7 @@ class WantedSearchService:
 
     # ------------------------------------------------------------------ search
 
-    def _search_impl(self, album_ids=None, apply=False) -> dict:
+    def _search_impl(self, album_ids=None, apply=False, retry_job_id=None) -> dict:
 
         """Search all wanted albums or a selected subset (dry-run by default)."""
 
@@ -1151,7 +1158,11 @@ class WantedSearchService:
 
             try:
 
-                search_job, _duplicate = self.job_manager.enqueue('search', {
+                if retry_job_id:
+                    search_job = self.job_manager.get_job(retry_job_id)
+                    _duplicate = False
+                else:
+                    search_job, _duplicate = self.job_manager.enqueue('search', {
 
                     'mode': mode,
 
@@ -1160,6 +1171,7 @@ class WantedSearchService:
                     'count': len(wanted),
 
                     'source': 'wanted-search',
+                    'apply': bool(apply),
 
                 }, dedupe_key='wanted-search-run-%s' % time.time())
                 if search_job:
@@ -1380,17 +1392,23 @@ class WantedSearchService:
 
             progress('search finished', fallback=len(report['fallback']))
 
-        job_progress(
+        search_result = {'command': status, 'albums': len(wanted),
 
-            status='succeeded' if report['success'] else 'failed',
+                         'blissful_fallback': len(report['fallback'])}
 
-            failure_reason=None if report['success'] else report.get('error', ''),
+        search_reason = None if report['success'] else report.get('error', '')
 
-            result={'command': status, 'albums': len(wanted),
+        if search_job and not report['success'] and not self._cancel_event.is_set():
 
-                    'blissful_fallback': len(report['fallback'])},
+            job_progress(result=search_result)
 
-        )
+            self.job_manager.schedule_retry(search_job['id'], search_reason)
+
+        else:
+
+            job_progress(status='succeeded' if report['success'] else 'failed',
+
+                         failure_reason=search_reason, result=search_result)
 
         return report
 
@@ -1591,7 +1609,8 @@ class WantedSearchService:
 
 
 
-    def _cleanup_impl(self, record_ids=None, apply=False, wait_minutes=10) -> dict:
+    def _cleanup_impl(self, record_ids=None, apply=False, wait_minutes=10,
+                      retry_job_id=None) -> dict:
 
         """Re-search and remove stale queue items once their files are imported.
 
@@ -1621,11 +1640,17 @@ class WantedSearchService:
 
             try:
 
-                cleanup_job, _duplicate = self.job_manager.enqueue(
+                if retry_job_id:
+                    cleanup_job = self.job_manager.get_job(retry_job_id)
+                    _duplicate = False
+                else:
+                    cleanup_job, _duplicate = self.job_manager.enqueue(
 
                     'cleanup', {'mode': 'stale-cleanup', 'apply': bool(apply),
 
-                                'source': 'stale-cleanup'},
+                                'source': 'stale-cleanup',
+                                'record_ids': record_ids,
+                                'wait_minutes': wait_minutes},
 
                     dedupe_key='stale-cleanup-run-%s' % time.time())
 
@@ -2097,29 +2122,106 @@ class WantedSearchService:
 
             counts = report.get('counts') or {}
 
-            job_progress(
+            cleanup_reason = ('; '.join(report['errors'][:2])[:200]
 
-                status='succeeded' if not report.get('errors') else 'failed',
+                              if report.get('errors') else None)
 
-                failure_reason=('; '.join(report['errors'][:2])[:200]
+            cleanup_result = {'command': 'stale-cleanup',
 
-                                if report.get('errors') else None),
+                              'imported': counts.get('imported', 0),
 
-                result={'command': 'stale-cleanup',
+                              'deleted': counts.get('deleted', 0),
 
-                        'imported': counts.get('imported', 0),
+                              'kept': counts.get('kept', 0),
 
-                        'deleted': counts.get('deleted', 0),
+                              'skipped': counts.get('skipped', 0)}
 
-                        'kept': counts.get('kept', 0),
+            if report.get('errors') and not self._cancel_event.is_set():
 
-                        'skipped': counts.get('skipped', 0)},
+                job_progress(result=cleanup_result)
 
-            )
+                self.job_manager.schedule_retry(cleanup_job_id, cleanup_reason)
+
+            else:
+
+                job_progress(status='succeeded' if not report.get('errors') else 'failed',
+
+                             failure_reason=cleanup_reason, result=cleanup_result)
 
         return report
 
 
+
+    def _process_due_retries(self):
+
+        """Start one due top-level search/cleanup retry, if no run is active."""
+
+        if self.job_manager is None:
+
+            return
+
+        if self.get_active() is not None or self._run_lock.locked():
+
+            return
+
+        now = time.time()
+
+        for job in self.job_manager.list_jobs(limit=200):
+
+            if job.get('status') != 'pending' or \
+                    job.get('kind') not in ('search', 'cleanup'):
+
+                continue
+
+            due = job.get('next_attempt_at')
+
+            if not isinstance(due, (int, float)) or due > now:
+
+                continue
+
+            payload = job.get('payload') or {}
+
+            claimed = self.job_manager.update_job(
+
+                job['id'], status='running', next_attempt_at=None)
+
+            if not claimed:
+
+                continue
+
+            current = self.job_manager.get_job(job['id'])
+
+            if not current or current.get('status') == 'cancelled':
+
+                continue
+
+            try:
+
+                if job.get('kind') == 'search':
+
+                    self.search(album_ids=payload.get('album_ids'),
+
+                                apply=bool(payload.get('apply', False)),
+
+                                retry_job_id=job['id'])
+
+                else:
+
+                    self.cleanup_stale(record_ids=payload.get('record_ids'),
+
+                                       apply=bool(payload.get('apply', False)),
+
+                                       wait_minutes=payload.get('wait_minutes', 10),
+
+                                       retry_job_id=job['id'])
+
+            except Exception as exc:
+
+                logger.warning('Wanted retry %s failed: %s', job['id'], exc)
+
+                self.job_manager.schedule_retry(job['id'], str(exc))
+
+            return
 
     # ---------------------------------------------------------------- scheduler
 
@@ -2188,6 +2290,8 @@ class WantedSearchService:
             while not stop_event.wait(poll):
 
                 try:
+
+                    self._process_due_retries()
 
                     if self._config().get('stale_cleanup_enabled') is False:
 

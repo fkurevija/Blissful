@@ -634,3 +634,13 @@ Track `GET /api/jobs` and retry with `POST /api/jobs/<id>/retry`; Lidarr can als
 POST to `/api/lidarr/webhook`. Jobs persist in `config/jobs.json`, are deduped by
 album, and a single background worker drains them. Set `enable_jobs: false` in
 config.json to restore synchronous album downloads.
+
+### Automatic retries
+
+Failed download jobs, wanted-search runs and stale-cleanup runs retry on the
+same job indefinitely until they succeed or you cancel them. Retries use capped
+exponential backoff (30s, 1m, 2m, 4m, then 5m maximum, with jitter) so rate
+limits are respected; the Downloads tab shows `retry Ns` on pending jobs.
+**Cancel** on a pending or running job stops further retries permanently —
+cancelled jobs are never revived. Retries do not survive a container restart:
+jobs left running at shutdown are marked cancelled on startup.

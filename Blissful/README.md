@@ -101,7 +101,7 @@ curl -s http://localhost:7373/api/health
 - 🔍 **Source Priorities** - Configure preferred download sources and candidates per source
 - 🏷️ **Metadata Providers** - Reorderable Spotify/Discogs/MusicBrainz query refinement and AcoustID fingerprint verification of downloads
 - 🛡️ **403-Resilient Downloads** - Bundled Deno runtime and PO-token sidecar keep YouTube/YouTube Music working
-- 📥 **Persistent Job Queue** - Downloads tab with history, live logs, details, retries and cancellation
+- 📥 **Persistent Job Queue** - Downloads tab with history, live logs, automatic retries with backoff, details and cancellation
 - 🔐 **Optional API Security** - Bearer-token auth and restricted CORS for exposing Blissful beyond a trusted LAN
 
 ---

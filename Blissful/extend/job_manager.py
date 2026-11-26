@@ -7,6 +7,7 @@ are collapsed by a dedupe key so a failing album is not retried forever.
 
 import json
 import logging
+import random
 import threading
 import time
 import uuid
@@ -16,6 +17,8 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 TERMINAL_STATUSES = {'succeeded', 'failed', 'cancelled'}
+RETRY_BASE_SECONDS = 30.0
+RETRY_MAX_SECONDS = 300.0
 
 
 def _now():
@@ -190,6 +193,42 @@ class JobManager:
                     return dict(job), True
         return None, False
 
+    @staticmethod
+    def retry_delay(attempts):
+        """Capped exponential backoff with jitter for automatic retries."""
+        try:
+            attempt = max(1, int(attempts))
+        except (TypeError, ValueError):
+            attempt = 1
+        delay = min(RETRY_MAX_SECONDS, RETRY_BASE_SECONDS * (2 ** (attempt - 1)))
+        return delay * random.uniform(0.8, 1.2)
+
+    def schedule_retry(self, job_id, reason=''):
+        """Keep a failed job alive and retry it after a bounded backoff.
+
+        The job stays ``pending`` (so the UI can still cancel it) with a
+        ``next_attempt_at`` timestamp. Cancelled jobs are never revived.
+        """
+        with self._lock:
+            for job in self.jobs:
+                if job['id'] != job_id:
+                    continue
+                if job.get('status') == 'cancelled':
+                    return None
+                attempts = int(job.get('attempts', 0)) + 1
+                delay = self.retry_delay(attempts)
+                job['status'] = 'pending'
+                job['failure_reason'] = reason or None
+                job['attempts'] = attempts
+                job['next_attempt_at'] = time.time() + delay
+                job['updated_at'] = _now()
+                self._append_log_locked(job, 'auto-retry scheduled',
+                                        attempt=attempts,
+                                        wait_seconds=round(delay))
+                self._persist()
+                return dict(job)
+        return None
+
     def prune(self, days=None):
         """Drop old terminal jobs beyond the configured retention window."""
         if days is None:
@@ -356,14 +395,20 @@ class JobManager:
 
     def _next_pending(self):
         with self._lock:
+            now = time.time()
             for job in self.jobs:
-                if job.get('status') == 'pending' and \
-                        job.get('kind') in self.managed_kinds:
-                    job['status'] = 'running'
-                    job['started_at'] = job.get('started_at') or _now()
-                    job['updated_at'] = _now()
-                    self._persist()
-                    return dict(job)
+                if job.get('status') != 'pending' or \
+                        job.get('kind') not in self.managed_kinds:
+                    continue
+                due = job.get('next_attempt_at')
+                if isinstance(due, (int, float)) and due > now:
+                    continue
+                job.pop('next_attempt_at', None)
+                job['status'] = 'running'
+                job['started_at'] = job.get('started_at') or _now()
+                job['updated_at'] = _now()
+                self._persist()
+                return dict(job)
         return None
 
     def _process(self, job):
@@ -405,6 +450,9 @@ class JobManager:
         with self._lock:
             for current in self.jobs:
                 if current['id'] == job['id']:
+                    if current.get('status') == 'cancelled':
+                        status = 'cancelled'
+                        reason = 'cancelled by user'
                     current['status'] = status
                     current['failure_reason'] = reason
                     current['result'] = {
@@ -422,3 +470,5 @@ class JobManager:
                         failure_reason=reason,
                         failures=failures[:5])
         logger.info("Job %s finished: %s", job['id'], status)
+        if status == 'failed' and job.get('kind') in self.managed_kinds:
+            self.schedule_retry(job['id'], reason)

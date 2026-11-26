@@ -88,6 +88,10 @@ function renderJobs(jobs) {
         status.className = 'job-status';
         status.dataset.status = job.status;
         status.textContent = job.status;
+        if (job.status === 'pending' && job.next_attempt_at) {
+            const wait = Math.max(0, Math.ceil(job.next_attempt_at - Date.now() / 1000));
+            status.textContent += ` · retry ${wait}s`;
+        }
         row.appendChild(status);
 
         const label = document.createElement('td');
