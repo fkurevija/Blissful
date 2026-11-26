@@ -384,9 +384,9 @@ class DownloadManager:
                 sources = self._build_source_list(search_query, source_priorities)
             else:
                 sources = [
-                    f"ytsearch1:{search_query} site:music.youtube.com",  # YouTube Music search
-                    f"ytsearch1:{search_query}",  # YouTube search
-                    f"scsearch1:{search_query}",  # SoundCloud search
+                    f"{self._search_prefix('ytsearch')}{search_query} site:music.youtube.com",  # YouTube Music search
+                    f"{self._search_prefix('ytsearch')}{search_query}",  # YouTube search
+                    f"{self._search_prefix('scsearch')}{search_query}",  # SoundCloud search
                 ]
 
             self._set_download_progress(
@@ -501,6 +501,14 @@ class DownloadManager:
                 'thumbnail_path': None,
             }
 
+    def _search_prefix(self, name: str) -> str:
+        """yt-dlp search prefix with the configured candidate count."""
+        try:
+            count = int(float(self._cfg('search_results_per_source', 3)))
+        except (TypeError, ValueError):
+            count = 3
+        return f"{name}{min(10, max(1, count))}:"
+
     def _duration_tolerance(self) -> float:
         raw = self._cfg('max_duration_deviation', 0.10)
         try:
@@ -544,13 +552,13 @@ class DownloadManager:
             if 'youtube' in name or 'youtube.com' in search:
                 if 'music' in name or 'music.youtube' in search:
                     clean_query = search_query.replace('"', '').replace("'", '').strip()
-                    sources.append(f"ytsearch1:{clean_query} site:music.youtube.com")
+                    sources.append(f"{self._search_prefix('ytsearch')}{clean_query} site:music.youtube.com")
                 else:
-                    sources.append(f"ytsearch1:{search_query}")
+                    sources.append(f"{self._search_prefix('ytsearch')}{search_query}")
 
             # SoundCloud
             elif 'soundcloud' in name or 'soundcloud.com' in search:
-                sources.append(f"scsearch1:{search_query}")
+                sources.append(f"{self._search_prefix('scsearch')}{search_query}")
 
             # Bandcamp: resolved to a real track/album URL at download time.
             elif 'bandcamp' in name or 'bandcamp.com' in search:
@@ -567,16 +575,16 @@ class DownloadManager:
 
             # Apple Music
             elif 'apple' in name or 'apple.com' in search:
-                sources.append(f"ytsearch1:{search_query} apple music")
+                sources.append(f"{self._search_prefix('ytsearch')}{search_query} apple music")
 
             # Deezer
             elif 'deezer' in name or 'deezer.com' in search:
-                sources.append(f"dzsearch:{search_query}")
-                sources.append(f"ytsearch1:{search_query} deezer")
+                sources.append(f"{self._search_prefix('dzsearch')}{search_query}")
+                sources.append(f"{self._search_prefix('ytsearch')}{search_query} deezer")
 
             # Tidal
             elif 'tidal' in name or 'tidal.com' in search:
-                sources.append(f"ytsearch1:{search_query} tidal")
+                sources.append(f"{self._search_prefix('ytsearch')}{search_query} tidal")
 
             # Mixcloud
             elif 'mixcloud' in name or 'mixcloud.com' in search:
@@ -588,11 +596,11 @@ class DownloadManager:
 
             # Jamendo
             elif 'jamendo' in name or 'jamendo.com' in search:
-                sources.append(f"ytsearch1:{search_query} jamendo")
+                sources.append(f"{self._search_prefix('ytsearch')}{search_query} jamendo")
 
             # Free Music Archive
             elif 'freemusicarchive' in name or 'freemusicarchive.org' in search:
-                sources.append(f"ytsearch1:{search_query} free music archive")
+                sources.append(f"{self._search_prefix('ytsearch')}{search_query} free music archive")
 
             # Audiomack
             elif 'audiomack' in name or 'audiomack.com' in search:
@@ -608,17 +616,17 @@ class DownloadManager:
 
             # TikTok
             elif 'tiktok' in name or 'tiktok.com' in search:
-                sources.append(f"ytsearch1:{search_query} tiktok")
+                sources.append(f"{self._search_prefix('ytsearch')}{search_query} tiktok")
 
             # Reverbnation
             elif 'reverbnation' in name or 'reverbnation.com' in search:
-                sources.append(f"ytsearch1:{search_query} reverbnation")
+                sources.append(f"{self._search_prefix('ytsearch')}{search_query} reverbnation")
 
         # If no sources were added, add default fallbacks
         if not sources:
             sources = [
-                f"ytsearch1:{search_query}",
-                f"scsearch1:{search_query}",
+                f"{self._search_prefix('ytsearch')}{search_query}",
+                f"{self._search_prefix('scsearch')}{search_query}",
             ]
 
         return sources

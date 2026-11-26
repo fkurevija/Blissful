@@ -68,6 +68,7 @@ class ConfigManager:
             'DISCOGS_CONSUMER_SECRET': 'discogs_consumer_secret',
             'ACOUSTID_API_KEY': 'acoustid_api_key',
             'ACOUSTID_USER_KEY': 'acoustid_user_key',
+            'SEARCH_RESULTS_PER_SOURCE': 'search_results_per_source',
             'DISCOGS_METADATA_ENABLED': 'discogs_metadata_enabled',
             'ACOUSTID_VERIFY_ENABLED': 'acoustid_verify_enabled',
             'POT_PROVIDER_URL': 'pot_provider_url',
@@ -78,12 +79,18 @@ class ConfigManager:
                      'discogs_metadata_enabled', 'acoustid_verify_enabled',
                      'wanted_search_enabled', 'stale_cleanup_enabled',
                      'prefer_blissful_for_stale'}
+        int_keys = {'search_results_per_source'}
         for env_key, config_key in env_map.items():
             value = os.environ.get(env_key)
             if value is None or value == '':
                 continue
             if config_key in bool_keys:
                 config[config_key] = value.strip().lower() in ('1', 'true', 'yes', 'on')
+            elif config_key in int_keys:
+                try:
+                    config[config_key] = int(value.strip())
+                except ValueError:
+                    pass
             else:
                 config[config_key] = value
         return config
@@ -134,6 +141,8 @@ class ConfigManager:
             # Optional API token. Off by default; enable when exposing Blissful
             # beyond a trusted LAN/VPN. BLISSFUL_AUTH_TOKEN env wins.
             'auth_token': '',
+            # Candidates returned by each searchable source (1-10).
+            'search_results_per_source': 3,
             # yt-dlp runtime / PO token provider (Deno + bgutil sidecar).
             'enable_pot_provider': True,
             'pot_provider_url': 'http://blissful-pot:4416',
@@ -368,6 +377,13 @@ class ConfigManager:
                 deviation = float(config['max_duration_deviation'])
                 if 0 <= deviation <= 1:
                     validated['max_duration_deviation'] = deviation
+            except (ValueError, TypeError):
+                pass
+        if 'search_results_per_source' in config:
+            try:
+                depth = int(float(config['search_results_per_source']))
+                if 1 <= depth <= 10:
+                    validated['search_results_per_source'] = depth
             except (ValueError, TypeError):
                 pass
         if 'acoustid_min_score' in config:

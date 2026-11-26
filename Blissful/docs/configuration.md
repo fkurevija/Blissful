@@ -267,6 +267,14 @@ Metadata providers never serve audio. Each has its own checkbox under
   secrets are masked in `/api/config`.
 - Providers are independent and optional: enable only the ones you have keys for.
 
+### **Search Depth**
+
+`search_results_per_source` (default `3`, allowed range 1-10) controls how many
+candidates each searchable source returns — `ytsearch3:` instead of `ytsearch1:`,
+and likewise for SoundCloud and Deezer. Raising it gives Blissful more candidates
+to try before giving up, at the cost of slower searches and more yt-dlp requests.
+It can also be set with `SEARCH_RESULTS_PER_SOURCE`; the environment value wins.
+
 
 ### **Filtering Sources**
 

@@ -7,6 +7,12 @@
                 Drag to reorder • Toggle switch to enable/disable • Sources are searched top-to-bottom until a match is found
             </p>
             
+            <div class="form-group">
+                <label for="searchResultsPerSource">Search results per source</label>
+                <input type="number" id="searchResultsPerSource" min="1" max="10" step="1" value="3">
+                <small>How many candidates each searchable source returns (1-10). Higher values try more candidates but take longer.</small>
+            </div>
+            
             <div id="sourcePriorityList" class="source-priority-list">
                 <!-- Will be populated by JavaScript -->
                 <div class="source-placeholder">
@@ -97,4 +103,6 @@
 .metadata-provider-card .metadata-provider-text strong { display: block; font-size: 1.05rem; color: var(--text-color); }
 .metadata-provider-card .metadata-provider-text small { display: block; margin-top: 4px; color: var(--text-muted); font-size: 0.85rem; line-height: 1.4; }
 .metadata-provider-card .metadata-provider-credentials input[type="number"] { width: 100%; padding: 12px; background: var(--bg-color); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-color); font-size: 1rem; }
+.sources-active-section input[type="number"] { width: 90px; padding: 8px; background: var(--bg-color); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-color); font-size: 1rem; }
+.sources-active-section .form-group small { display: block; margin-top: 5px; color: var(--text-muted); font-size: 0.85rem; }
 </style>

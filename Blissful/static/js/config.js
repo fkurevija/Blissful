@@ -168,6 +168,11 @@ async function loadConfiguration() {
             addPathMapping(lidarrPath, microPath);
         });
         
+        const depthField = document.getElementById('searchResultsPerSource');
+        const savedDepth = config.search_results_per_source;
+        depthField.value = (savedDepth === undefined || savedDepth === null)
+            ? '3' : String(savedDepth);
+        
         // Load source priorities
         const priorities = config.source_priorities || [];
         loadSourcePriorities(priorities);
@@ -238,6 +243,8 @@ async function saveConfiguration() {
             
             lidarr_path_mapping: getPathMappings(),
             source_priorities: getSourcePriorities(),
+            search_results_per_source: Math.min(10, Math.max(1,
+                parseInt(document.getElementById('searchResultsPerSource').value, 10) || 3)),
             
             // Request system settings
             enable_requests: document.getElementById('enableRequests').checked,
