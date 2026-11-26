@@ -66,7 +66,7 @@ function renderJobs(jobs) {
     const headRow = document.createElement('tr');
     const columns = [
         ['status', 'Status'], ['job', 'Job'], ['source', 'Source'],
-        ['updated', 'Updated'], ['detail', '']
+        ['updated', 'Updated']
     ];
     columns.forEach(([key, label]) => {
         const th = document.createElement('th');
@@ -104,28 +104,40 @@ function renderJobs(jobs) {
         updated.textContent = job.updated_at ? String(job.updated_at).replace('T', ' ').slice(0, 19) : '';
         row.appendChild(updated);
 
-        const detail = document.createElement('td');
-        detail.className = 'job-reason';
-        const result = job.result || {};
-        const failures = result.failures || [];
-        const progress = job.progress || {};
-        const btn = document.createElement('button');
-        btn.type = 'button';
-        btn.className = 'btn btn-secondary job-action job-details';
-        btn.textContent = 'Details';
-        btn.dataset.jobId = job.id;
-        btn.addEventListener('click', () => showJobDetails(job.id));
-        detail.appendChild(btn);
-        row.appendChild(detail);
-
+        // Fixed three-slot grid: Details | Delete | Retry/Cancel.
+        // Unavailable actions are omitted, leaving an aligned blank column.
         const actions = document.createElement('td');
         actions.className = 'job-actions';
+        const makeAction = (text, extraClass, handler, column) => {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'btn btn-secondary job-action' + (extraClass ? ' ' + extraClass : '');
+            button.textContent = text;
+            button.style.gridColumn = String(column);
+            button.addEventListener('click', handler);
+            actions.appendChild(button);
+            return button;
+        };
+
+        const detailsBtn = makeAction('Details', 'job-details',
+            () => showJobDetails(job.id), 1);
+        detailsBtn.dataset.jobId = job.id;
+
+        if (job.status !== 'pending' && job.status !== 'running') {
+            makeAction('Delete', '', async () => {
+                try {
+                    const res = await fetch(`/api/jobs/${job.id}`, { method: 'DELETE' });
+                    const data = await res.json();
+                    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+                    loadJobs();
+                } catch (error) {
+                    showNotification(`Delete failed: ${error.message}`, 'error');
+                }
+            }, 2);
+        }
+
         if (job.status === 'failed') {
-            const retry = document.createElement('button');
-            retry.type = 'button';
-            retry.className = 'btn btn-secondary job-action';
-            retry.textContent = 'Retry';
-            retry.addEventListener('click', async () => {
+            makeAction('Retry', '', async () => {
                 try {
                     const res = await fetch(`/api/jobs/${job.id}/retry`, { method: 'POST' });
                     const data = await res.json();
@@ -134,15 +146,9 @@ function renderJobs(jobs) {
                 } catch (error) {
                     showNotification(`Retry failed: ${error.message}`, 'error');
                 }
-            });
-            actions.appendChild(retry);
-        }
-        if (job.status === 'pending' || job.status === 'running') {
-            const cancel = document.createElement('button');
-            cancel.type = 'button';
-            cancel.className = 'btn btn-secondary job-action';
-            cancel.textContent = 'Cancel';
-            cancel.addEventListener('click', async () => {
+            }, 3);
+        } else if (job.status === 'pending' || job.status === 'running') {
+            makeAction('Cancel', '', async () => {
                 try {
                     const res = await fetch(`/api/jobs/${job.id}/cancel`, { method: 'POST' });
                     const data = await res.json();
@@ -153,25 +159,7 @@ function renderJobs(jobs) {
                 } catch (error) {
                     showNotification(`Cancel failed: ${error.message}`, 'error');
                 }
-            });
-            actions.appendChild(cancel);
-        }
-        if (job.status !== 'pending' && job.status !== 'running') {
-            const del = document.createElement('button');
-            del.type = 'button';
-            del.className = 'btn btn-secondary job-action';
-            del.textContent = 'Delete';
-            del.addEventListener('click', async () => {
-                try {
-                    const res = await fetch(`/api/jobs/${job.id}`, { method: 'DELETE' });
-                    const data = await res.json();
-                    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-                    loadJobs();
-                } catch (error) {
-                    showNotification(`Delete failed: ${error.message}`, 'error');
-                }
-            });
-            actions.appendChild(del);
+            }, 3);
         }
         row.appendChild(actions);
         body.appendChild(row);

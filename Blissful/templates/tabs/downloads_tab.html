@@ -27,10 +27,8 @@
 .job-status[data-status="succeeded"] { color: #10b981; }
 .job-status[data-status="failed"] { color: #ef4444; }
 .job-status[data-status="running"] { color: #f59e0b; }
-.job-reason { max-width: 340px; color: var(--muted-foreground); word-break: break-word; }
-.jobs-table .job-action { padding: 4px 10px; font-size: 12px; min-width: 56px; }
-.jobs-table td button + button { margin-left: 6px; }
-.jobs-table .job-actions { display: flex; gap: 6px; align-items: center; }
+.jobs-table .job-action { padding: 4px 6px; font-size: 12px; width: 100%; min-width: 0; }
+.jobs-table .job-actions { display: grid; grid-template-columns: repeat(3, minmax(68px, 1fr)); gap: 8px; align-items: center; }
 .job-details-pane {
     position: fixed; top: 10%; left: 50%; transform: translateX(-50%);
     width: min(720px, 92vw); height: min(85vh, 820px);
