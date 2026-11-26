@@ -66,18 +66,18 @@ function renderJobs(jobs) {
     const headRow = document.createElement('tr');
     const columns = [
         ['status', 'Status'], ['job', 'Job'], ['source', 'Source'],
-        ['updated', 'Updated'], ['detail', 'Detail']
+        ['updated', 'Updated'], ['detail', '']
     ];
     columns.forEach(([key, label]) => {
         const th = document.createElement('th');
         th.dataset.sortKey = key;
         const arrow = jobsSort.key === key ? (jobsSort.dir === 'asc' ? ' ▲' : ' ▼') : '';
-        th.textContent = label + arrow;
+        th.textContent = label ? label + arrow : '';
         th.addEventListener('click', () => sortJobsBy(key));
         headRow.appendChild(th);
     });
     const actionHead = document.createElement('th');
-    actionHead.textContent = 'Actions';
+    actionHead.textContent = '';
     headRow.appendChild(actionHead);
     head.appendChild(headRow);
     table.appendChild(head);
