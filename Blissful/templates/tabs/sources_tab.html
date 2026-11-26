@@ -26,93 +26,33 @@
     <div class="card">
         <h2>🎧 Metadata Providers</h2>
         <p class="help-text">
-            Metadata providers do not serve audio. Spotify, Discogs and MusicBrainz
-            refine the query
-            before Blissful asks YouTube, YouTube Music, SoundCloud or Bandcamp for the
-            track. AcoustID fingerprints the downloaded file and rejects it when it does
-            not match the expected recording.
+            Metadata providers do not serve audio. Drag to reorder, toggle to enable,
+            and click a provider to show its fields. The first enabled provider that
+            resolves a track wins. AcoustID only verifies audio after download.
         </p>
-        <div class="form-group metadata-provider-card">
-            <label for="spotifyMetadataEnabled" class="metadata-provider-label">
-                <input type="checkbox" id="spotifyMetadataEnabled">
-                <span class="metadata-provider-text">
-                    <strong>Use Spotify as a metadata source</strong>
-                    <small>Optional. Refines track metadata with your Spotify credentials below; does not provide audio. Requires your own Spotify developer client ID and secret.</small>
-                </span>
-            </label>
-            <div class="metadata-provider-credentials">
-                <div class="form-group">
-                    <label for="spotifyClientId">Spotify Client ID</label>
-                    <input type="text" id="spotifyClientId" placeholder="From Spotify Developer Dashboard">
-                </div>
-                <div class="form-group">
-                    <label for="spotifyClientSecret">Spotify Client Secret</label>
-                    <input type="password" id="spotifyClientSecret" placeholder="Leave blank to keep saved secret">
-                </div>
-            </div>
-        </div>
-        <div class="form-group metadata-provider-card">
-            <label for="discogsMetadataEnabled" class="metadata-provider-label">
-                <input type="checkbox" id="discogsMetadataEnabled">
-                <span class="metadata-provider-text">
-                    <strong>Use Discogs as a metadata source</strong>
-                    <small>Optional. Looks up the release with your Discogs token and adds its year/edition to the search query. Does not provide audio.</small>
-                </span>
-            </label>
-            <div class="metadata-provider-credentials">
-                <div class="form-group">
-                    <label for="discogsToken">Discogs Personal Access Token</label>
-                    <input type="password" id="discogsToken" placeholder="From Discogs Developer Settings">
-                </div>
-            </div>
-        </div>
-
-        <div class="form-group metadata-provider-card">
-            <label for="acoustidVerifyEnabled" class="metadata-provider-label">
-                <input type="checkbox" id="acoustidVerifyEnabled">
-                <span class="metadata-provider-text">
-                    <strong>Verify downloads with AcoustID fingerprinting</strong>
-                    <small>Optional. Fingerprints a downloaded track with Chromaprint and rejects it if AcoustID identifies a different recording. AcoustID has no text search; it verifies audio only. Needs an application key, plus a user key from January 2027.</small>
-                </span>
-            </label>
-            <div class="metadata-provider-credentials">
-                <div class="form-group">
-                    <label for="acoustidApiKey">AcoustID Application Key (client)</label>
-                    <input type="password" id="acoustidApiKey" placeholder="From acoustid.org/new-application">
-                </div>
-                <div class="form-group">
-                    <label for="acoustidUserKey">AcoustID User Key</label>
-                    <input type="password" id="acoustidUserKey" placeholder="From acoustid.org/api-key (required from 2027)">
-                </div>
-                <div class="form-group">
-                    <label for="acoustidMinScore">Minimum match score</label>
-                    <input type="number" id="acoustidMinScore" min="0" max="1" step="0.05" value="0.75">
-                    <small>0 to 1; higher is stricter. A candidate is accepted when its artist and title match at or above this score.</small>
-                </div>
-            </div>
-        </div>
-        <div class="form-group metadata-provider-card">
-            <label for="musicbrainzMetadataEnabled" class="metadata-provider-label">
-                <input type="checkbox" id="musicbrainzMetadataEnabled">
-                <span class="metadata-provider-text">
-                    <strong>Use MusicBrainz as a metadata source</strong>
-                    <small>Optional, no account needed. Looks up the exact recording, release and year to sharpen searches before download. MusicBrainz is public and rate-limited to one request per second.</small>
-                </span>
-            </label>
+        <div id="metadataProviderList" class="metadata-provider-list">
+            <!-- Populated by metadata.js -->
         </div>
     </div>
 </div>
 
 <style>
-.metadata-provider-card { margin-top: 24px; padding: 16px; border: 2px solid var(--primary-color, #6366f1); border-radius: 8px; background: rgba(99,102,241,0.08); }
-.metadata-provider-card .metadata-provider-credentials { margin-top: 16px; }
-.metadata-provider-card .metadata-provider-credentials .form-group { margin-bottom: 16px; }
-.metadata-provider-card .metadata-provider-credentials .form-group:last-child { margin-bottom: 0; }
-.metadata-provider-card .metadata-provider-label { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 0; cursor: pointer; }
-.metadata-provider-card .metadata-provider-label input[type="checkbox"] { width: 22px; height: 22px; flex: 0 0 auto; margin-top: 2px; }
-.metadata-provider-card .metadata-provider-text strong { display: block; font-size: 1.05rem; color: var(--text-color); }
-.metadata-provider-card .metadata-provider-text small { display: block; margin-top: 4px; color: var(--text-muted); font-size: 0.85rem; line-height: 1.4; }
-.metadata-provider-card .metadata-provider-credentials input[type="number"] { width: 100%; padding: 12px; background: var(--bg-color); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-color); font-size: 1rem; }
+.metadata-provider-list { display: flex; flex-direction: column; gap: 12px; margin-top: 15px; }
+.metadata-provider-item { background: var(--card-bg); padding: 15px; border-radius: 10px; border: 2px solid var(--border-color); transition: all 0.3s ease; }
+.metadata-provider-item:hover { border-color: var(--primary-color); box-shadow: 0 4px 12px rgba(99,102,241,0.3); }
+.metadata-provider-item.dragging { opacity: 0.5; transform: rotate(2deg); }
+.metadata-header { display: flex; align-items: center; gap: 15px; }
+.metadata-info { flex: 1; display: flex; flex-direction: column; gap: 5px; min-width: 0; cursor: pointer; }
+.metadata-info strong { color: var(--text-color); font-size: 1.1rem; font-weight: 600; }
+.metadata-info small { color: var(--text-muted); font-size: 0.9rem; }
+.metadata-hint { font-size: 1.1rem; color: var(--text-muted); cursor: pointer; }
+.metadata-provider-item.expanded .metadata-hint { transform: rotate(180deg); }
+.metadata-fields { display: none; margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--border-color); }
+.metadata-provider-item.expanded .metadata-fields { display: block; }
+.metadata-fields .form-group { margin-bottom: 16px; }
+.metadata-fields .form-group:last-child { margin-bottom: 0; }
+.metadata-fields input[type="text"], .metadata-fields input[type="password"], .metadata-fields input[type="number"] { width: 100%; padding: 12px; background: var(--bg-color); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-color); font-size: 1rem; }
+.metadata-fields small { display: block; margin-top: 5px; color: var(--text-muted); font-size: 0.85rem; }
 .sources-active-section input[type="number"] { width: 90px; padding: 8px; background: var(--bg-color); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-color); font-size: 1rem; }
 .sources-active-section .form-group small { display: block; margin-top: 5px; color: var(--text-muted); font-size: 0.85rem; }
 </style>

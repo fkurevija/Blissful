@@ -336,68 +336,8 @@ class DownloadManager:
             Dict with success status, file path, duration, thumbnail path or error
         """
         try:
-            search_query = f"{artist} - {title}"
-            if album:
-                search_query = f"{artist} - {album} - {title}"
-
-            metadata_source = 'plain'
-            if self._as_bool(self._cfg('spotify_metadata_enabled', False), False) \
-                    and self.spotify_client is not None:
-                duration_ms = None
-                if expected_duration is not None:
-                    try:
-                        duration_ms = int(float(expected_duration) * 1000)
-                    except (TypeError, ValueError):
-                        duration_ms = None
-                metadata = None
-                try:
-                    metadata = self.spotify_client.resolve_track(
-                        artist, title, album=album or None, duration_ms=duration_ms)
-                except Exception:
-                    logger.debug('Spotify metadata lookup unavailable; using plain query')
-                if metadata:
-                    try:
-                        refined = self.spotify_client.build_search_query(metadata)
-                        if refined:
-                            search_query = refined
-                            metadata_source = 'spotify'
-                    except Exception:
-                        logger.debug('Could not build Spotify-backed search query')
-
-            if self._as_bool(self._cfg('discogs_metadata_enabled', False), False) \
-                    and self.discogs_client is not None:
-                try:
-                    release = self.discogs_client.resolve_track(
-                        artist, title, album=album or None)
-                except Exception:
-                    logger.debug('Discogs metadata lookup unavailable; using current query')
-                    release = None
-                if release:
-                    try:
-                        refined = self.discogs_client.build_search_query(release)
-                        if refined:
-                            search_query = refined
-                            metadata_source = 'discogs'
-                    except Exception:
-                        logger.debug('Could not build Discogs-backed search query')
-
-            if self._as_bool(self._cfg('musicbrainz_metadata_enabled', False), False) \
-                    and self.musicbrainz_client is not None:
-                try:
-                    recording = self.musicbrainz_client.resolve_track(
-                        artist, title, album=album or None)
-                except Exception:
-                    logger.debug('MusicBrainz lookup unavailable; using current query')
-                    recording = None
-                if recording:
-                    try:
-                        refined = self.musicbrainz_client.build_search_query(recording)
-                        if refined:
-                            search_query = refined
-                            metadata_source = 'musicbrainz'
-                    except Exception:
-                        logger.debug('Could not build MusicBrainz-backed search query')
-
+            search_query, metadata_source = self._refine_search_query(
+                artist, title, album, expected_duration)
             logger.info(f"Searching for: {search_query} (metadata: {metadata_source})")
 
             if source_priorities:
@@ -520,6 +460,101 @@ class DownloadManager:
                 'duration': None,
                 'thumbnail_path': None,
             }
+
+    def _metadata_order(self):
+        """Configured provider order, sanitized and always complete."""
+        known = ['spotify', 'discogs', 'musicbrainz', 'acoustid']
+        raw = self._cfg('metadata_provider_order', None)
+        order = []
+        if isinstance(raw, (list, tuple)):
+            for item in raw:
+                name = str(item).strip().lower()
+                if name in known and name not in order:
+                    order.append(name)
+        for name in known:
+            if name not in order:
+                order.append(name)
+        return order
+
+    def _refine_search_query(self, artist, title, album, expected_duration=None):
+        """Build the query from the first enabled provider that resolves."""
+        query = f"{artist} - {album} - {title}" if album else f"{artist} - {title}"
+        source = 'plain'
+
+        def spotify():
+            nonlocal query, source
+            if not self._as_bool(self._cfg('spotify_metadata_enabled', False), False) \
+                    or self.spotify_client is None:
+                return False
+            duration_ms = None
+            if expected_duration is not None:
+                try:
+                    duration_ms = int(float(expected_duration) * 1000)
+                except (TypeError, ValueError):
+                    pass
+            try:
+                metadata = self.spotify_client.resolve_track(
+                    artist, title, album=album or None, duration_ms=duration_ms)
+            except Exception:
+                logger.debug('Spotify lookup unavailable; using plain query')
+                return False
+            try:
+                refined = self.spotify_client.build_search_query(metadata) if metadata else None
+            except Exception:
+                refined = None
+            if refined:
+                query, source = refined, 'spotify'
+                return True
+            return False
+
+        def discogs():
+            nonlocal query, source
+            if not self._as_bool(self._cfg('discogs_metadata_enabled', False), False) \
+                    or self.discogs_client is None:
+                return False
+            try:
+                release = self.discogs_client.resolve_track(
+                    artist, title, album=album or None)
+            except Exception:
+                logger.debug('Discogs lookup unavailable; using current query')
+                return False
+            try:
+                refined = self.discogs_client.build_search_query(release) if release else None
+            except Exception:
+                refined = None
+            if refined:
+                query, source = refined, 'discogs'
+                return True
+            return False
+
+        def musicbrainz():
+            nonlocal query, source
+            if not self._as_bool(self._cfg('musicbrainz_metadata_enabled', False), False):
+                return False
+            if self.musicbrainz_client is None:
+                return False
+            try:
+                recording = self.musicbrainz_client.resolve_track(
+                    artist, title, album=album or None)
+            except Exception:
+                logger.debug('MusicBrainz lookup unavailable; using current query')
+                return False
+            try:
+                refined = self.musicbrainz_client.build_search_query(recording) if recording else None
+            except Exception:
+                refined = None
+            if refined:
+                query, source = refined, 'musicbrainz'
+                return True
+            return False
+
+        handlers = {'spotify': spotify, 'discogs': discogs,
+                    'musicbrainz': musicbrainz}
+        for name in self._metadata_order():
+            handler = handlers.get(name)
+            if handler and handler():
+                break
+        return query, source
 
     def _search_prefix(self, name: str) -> str:
         """yt-dlp search prefix with the configured candidate count."""

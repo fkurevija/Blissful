@@ -240,8 +240,12 @@ Control which sources are tried first:
 
 ### **Metadata Providers**
 
-Metadata providers never serve audio. Each has its own checkbox under
-**Sources → Metadata Providers** and is off by default.
+Metadata providers never serve audio. Each has its own toggle under
+**Sources → Metadata Providers** and is off by default. Drag the rows to
+reorder them: the **first enabled provider that resolves a track wins**, so
+put your most trusted source at the top. Click a provider row to expand its
+credential fields; MusicBrainz has none. AcoustID only verifies audio after
+download, so its position in the list has no effect on query refinement.
 
 | Provider | What it does | Credentials |
 | --- | --- | --- |
@@ -268,6 +272,7 @@ Metadata providers never serve audio. Each has its own checkbox under
   over saved config, and all
   secrets are masked in `/api/config`.
 - Providers are independent and optional: enable only the ones you have keys for.
+- `metadata_provider_order` stores the dragged order and is saved automatically.
 
 ### **Search Depth**
 

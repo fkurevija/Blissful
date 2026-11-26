@@ -137,6 +137,8 @@ class ConfigManager:
             'discogs_consumer_secret': '',
             'musicbrainz_metadata_enabled': False,
             'musicbrainz_user_agent': '',
+            # First metadata provider with a match wins.
+            'metadata_provider_order': ['spotify', 'discogs', 'musicbrainz', 'acoustid'],
             'acoustid_verify_enabled': False,
             'acoustid_api_key': '',
             'acoustid_user_key': '',
@@ -384,6 +386,17 @@ class ConfigManager:
                     validated['max_duration_deviation'] = deviation
             except (ValueError, TypeError):
                 pass
+        if 'metadata_provider_order' in config and isinstance(config['metadata_provider_order'], list):
+            known = ('spotify', 'discogs', 'musicbrainz', 'acoustid')
+            cleaned = []
+            for item in config['metadata_provider_order']:
+                name = str(item).strip().lower()
+                if name in known and name not in cleaned:
+                    cleaned.append(name)
+            for name in known:
+                if name not in cleaned:
+                    cleaned.append(name)
+            validated['metadata_provider_order'] = cleaned
         if 'search_results_per_source' in config:
             try:
                 depth = int(float(config['search_results_per_source']))
