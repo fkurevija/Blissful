@@ -36,6 +36,8 @@ class DownloadManager:
         download_dir: str = 'downloads',
         config_manager: Any = None,
         spotify_client: Any = None,
+        discogs_client: Any = None,
+        acoustid_client: Any = None,
     ):
         """
         Initialize download manager.
@@ -44,6 +46,8 @@ class DownloadManager:
             download_dir: Directory to store downloaded files
             config_manager: Optional ConfigManager-compatible object/dict
             spotify_client: Optional metadata-only SpotifyClient
+            discogs_client: Optional metadata-only DiscogsClient (query refinement)
+            acoustid_client: Optional AcoustIDClient (post-download verification)
         """
         self.download_dir = Path(download_dir)
         self.download_dir.mkdir(parents=True, exist_ok=True)
@@ -54,6 +58,8 @@ class DownloadManager:
 
         self.config_manager = config_manager
         self.spotify_client = spotify_client
+        self.discogs_client = discogs_client
+        self.acoustid_client = acoustid_client
 
     # ------------------------------------------------------------------
     # Configuration helpers
@@ -331,6 +337,7 @@ class DownloadManager:
             if album:
                 search_query = f"{artist} - {album} - {title}"
 
+            metadata_source = 'plain'
             if self._as_bool(self._cfg('spotify_metadata_enabled', False), False) \
                     and self.spotify_client is not None:
                 duration_ms = None
@@ -350,10 +357,28 @@ class DownloadManager:
                         refined = self.spotify_client.build_search_query(metadata)
                         if refined:
                             search_query = refined
+                            metadata_source = 'spotify'
                     except Exception:
                         logger.debug('Could not build Spotify-backed search query')
 
-            logger.info(f"Searching for: {search_query}")
+            if self._as_bool(self._cfg('discogs_metadata_enabled', False), False) \
+                    and self.discogs_client is not None:
+                try:
+                    release = self.discogs_client.resolve_track(
+                        artist, title, album=album or None)
+                except Exception:
+                    logger.debug('Discogs metadata lookup unavailable; using current query')
+                    release = None
+                if release:
+                    try:
+                        refined = self.discogs_client.build_search_query(release)
+                        if refined:
+                            search_query = refined
+                            metadata_source = 'discogs'
+                    except Exception:
+                        logger.debug('Could not build Discogs-backed search query')
+
+            logger.info(f"Searching for: {search_query} (metadata: {metadata_source})")
 
             if source_priorities:
                 sources = self._build_source_list(search_query, source_priorities)
@@ -372,6 +397,8 @@ class DownloadManager:
             downloaded_file = None
             final_duration = None
             final_thumbnail = None
+            final_acoustid = None
+            acoustid_info = None
             last_error = None
 
             for index, source in enumerate(sources, 1):
@@ -401,10 +428,36 @@ class DownloadManager:
                         self._add_source_attempt(source, 'rejected', last_error)
                         continue
 
+                    acoustid_info = None
+                    if self._as_bool(self._cfg('acoustid_verify_enabled', False), False) \
+                            and self.acoustid_client is not None:
+                        candidate = result.get('file_path')
+                        if candidate:
+                            try:
+                                acoustid_info = self.acoustid_client.verify_file(
+                                    candidate, artist=artist, title=title)
+                            except Exception:
+                                logger.debug('AcoustID verification unavailable')
+                            if acoustid_info and not acoustid_info.get('verified'):
+                                logger.warning(
+                                    'Rejected candidate from %s: AcoustID score %s for %s',
+                                    source, acoustid_info.get('score'),
+                                    acoustid_info.get('name'))
+                                self._delete_file(candidate)
+                                last_error = 'AcoustID verification failed'
+                                self._add_source_attempt(source, 'rejected', last_error)
+                                continue
+                            if acoustid_info:
+                                self._add_source_attempt(
+                                    source, 'verified',
+                                    'AcoustID score %s' % acoustid_info.get('score'))
+
                     downloaded_file = result.get('file_path')
                     final_duration = duration
                     final_thumbnail = result.get('thumbnail_path')
-                    self._add_source_attempt(source, 'success')
+                    final_acoustid = acoustid_info
+                    if not acoustid_info:
+                        self._add_source_attempt(source, 'success')
                     self._set_download_progress(status='downloaded', source=source,
                                                 pending=max(0, len(sources) - index))
                     break
@@ -423,6 +476,7 @@ class DownloadManager:
                     'title': title,
                     'duration': final_duration,
                     'thumbnail_path': final_thumbnail,
+                    'acoustid': final_acoustid,
                 }
 
             attempts = []
@@ -504,6 +558,11 @@ class DownloadManager:
 
             # Spotify: metadata only - intentionally no download source here.
             elif 'spotify' in name or 'spotify.com' in search:
+                continue
+
+            # Discogs/AcoustID: metadata only - never download sources.
+            elif ('discog' in name or 'discogs.com' in search
+                  or 'acoustid' in name or 'acoustid.org' in search):
                 continue
 
             # Apple Music

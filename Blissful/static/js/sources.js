@@ -7,9 +7,10 @@ let draggedItem = null;
 
 // Load source priorities - shows ALL searchable sources
 function loadSourcePriorities(priorities) {
-    // Spotify is metadata-only in this fork; hide any stale saved entry.
+    // Spotify, Discogs and AcoustID are metadata-only; hide stale saved entries.
     priorities = (priorities || []).filter(source =>
-        !/spotify/i.test(source.name || '') && !/spotify/i.test(source.search || ''));
+        !/spotify|discog|acoustid|chromaprint/i.test(source.name || '') &&
+        !/spotify|discog|acoustid|chromaprint/i.test(source.search || ''));
     const container = document.getElementById('sourcePriorityList');
     container.innerHTML = '';
     

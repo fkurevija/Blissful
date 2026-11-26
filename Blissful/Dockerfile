@@ -11,6 +11,7 @@ ARG DEBIAN_FRONTEND=noninteractive
 # ownership. passwd: create the unprivileged runtime user at build time.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ffmpeg \
+        libchromaprint-tools \
         curl \
         unzip \
         ca-certificates \

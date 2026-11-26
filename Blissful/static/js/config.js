@@ -112,6 +112,17 @@ async function loadConfiguration() {
         document.getElementById('embedMetadata').checked = config.embed_metadata !== false;
         document.getElementById('embedThumbnail').checked = config.embed_thumbnail !== false;
         
+        const setSecret = (field, value, savedText, blankText) => {
+            if (value === '***MASKED***') {
+                field.value = '';
+                field.dataset.hasSavedKey = 'true';
+                field.placeholder = savedText;
+            } else {
+                field.value = value || '';
+                field.dataset.hasSavedKey = 'false';
+                field.placeholder = blankText;
+            }
+        };
         // Metadata providers (do not serve audio)
         document.getElementById('spotifyMetadataEnabled').checked = config.spotify_metadata_enabled || false;
         document.getElementById('spotifyClientId').value = config.spotify_client_id || '';
@@ -126,6 +137,20 @@ async function loadConfiguration() {
             spotifySecretField.placeholder = 'Leave blank to keep saved secret';
         }
         
+        document.getElementById('discogsMetadataEnabled').checked =
+            config.discogs_metadata_enabled || false;
+        setSecret(document.getElementById('discogsToken'), config.discogs_token,
+                  'Token configured (leave blank to keep)', 'Discogs personal access token');
+        document.getElementById('acoustidVerifyEnabled').checked =
+            config.acoustid_verify_enabled || false;
+        setSecret(document.getElementById('acoustidApiKey'), config.acoustid_api_key,
+                  'Key configured (leave blank to keep)', 'AcoustID application key');
+        setSecret(document.getElementById('acoustidUserKey'), config.acoustid_user_key,
+                  'Key configured (leave blank to keep)', 'AcoustID user key');
+        const minScore = config.acoustid_min_score;
+        document.getElementById('acoustidMinScore').value =
+            (minScore === undefined || minScore === null) ? '0.75' : String(minScore);
+
         // Optional API token
         const tokenField = document.getElementById('authToken');
         if (config.auth_token === '***MASKED***') {
@@ -175,6 +200,10 @@ async function saveConfiguration() {
         const apiKeyField = document.getElementById('lidarrApiKey');
         const apiKeyValue = apiKeyField.value.trim();
         
+        const minScoreRaw = parseFloat(document.getElementById('acoustidMinScore').value);
+        const acoustidMinScore = isNaN(minScoreRaw)
+            ? 0.75 : Math.min(1, Math.max(0, minScoreRaw));
+
         // Build config object - ALWAYS include lidarr_api_key
         const config = {
             lidarr_url: document.getElementById('lidarrUrl').value,
@@ -200,6 +229,12 @@ async function saveConfiguration() {
             spotify_client_id: document.getElementById('spotifyClientId').value.trim(),
             spotify_client_secret: document.getElementById('spotifyClientSecret').value.trim(),
             auth_token: document.getElementById('authToken').value.trim(),
+            discogs_metadata_enabled: document.getElementById('discogsMetadataEnabled').checked,
+            discogs_token: document.getElementById('discogsToken').value.trim(),
+            acoustid_verify_enabled: document.getElementById('acoustidVerifyEnabled').checked,
+            acoustid_api_key: document.getElementById('acoustidApiKey').value.trim(),
+            acoustid_user_key: document.getElementById('acoustidUserKey').value.trim(),
+            acoustid_min_score: acoustidMinScore,
             
             lidarr_path_mapping: getPathMappings(),
             source_priorities: getSourcePriorities(),
@@ -232,12 +267,26 @@ async function saveConfiguration() {
         if (!config.auth_token && tokenField.dataset.hasSavedKey === 'true') {
             config.auth_token = '***KEEP_EXISTING***';
         }
+        for (const [key, id] of [
+            ['discogs_token', 'discogsToken'],
+            ['acoustid_api_key', 'acoustidApiKey'],
+            ['acoustid_user_key', 'acoustidUserKey']
+        ]) {
+            const field = document.getElementById(id);
+            if (!config[key] && field.dataset.hasSavedKey === 'true') {
+                config[key] = '***KEEP_EXISTING***';
+            }
+        }
         
-        console.log('Saving configuration:', { 
-            ...config, 
-            lidarr_api_key: config.lidarr_api_key === '***KEEP_EXISTING***' ? '(keeping existing)' : 
-                           config.lidarr_api_key ? '***' : '(empty)' 
-        });
+        const secretKeys = ['lidarr_api_key', 'spotify_client_secret', 'discogs_token',
+            'acoustid_api_key', 'acoustid_user_key', 'auth_token'];
+        const loggable = { ...config };
+        for (const key of secretKeys) {
+            if (loggable[key] && loggable[key] !== '***KEEP_EXISTING***') {
+                loggable[key] = '***';
+            }
+        }
+        console.log('Saving configuration:', loggable);
         
         const response = await fetch('/api/config', {
             method: 'POST',

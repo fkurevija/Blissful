@@ -27,6 +27,8 @@ from extend.track_manager import TrackManager
 from extend.sources_api import SourcesAPI
 from extend.system_utils import SystemUtils
 from extend.spotify_client import SpotifyClient
+from extend.discogs_client import DiscogsClient
+from extend.acoustid_client import AcoustIDClient
 from extend.auth import install_auth, is_enabled
 from extend.job_manager import JobManager
 from extend.wanted_search import WantedSearchService
@@ -86,8 +88,12 @@ logger.info("📦 Initializing core managers...")
 
 config_manager = ConfigManager()
 spotify_client = SpotifyClient(config_manager)
+discogs_client = DiscogsClient(config_manager)
+acoustid_client = AcoustIDClient(config_manager)
 download_manager = DownloadManager(config_manager=config_manager,
-                                    spotify_client=spotify_client)
+                                    spotify_client=spotify_client,
+                                    discogs_client=discogs_client,
+                                    acoustid_client=acoustid_client)
 audio_converter = AudioConverter()
 source_manager = SourceManager()
 

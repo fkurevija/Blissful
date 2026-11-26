@@ -63,11 +63,19 @@ class ConfigManager:
             'PREFER_BLISSFUL_FOR_WANTED': 'prefer_blissful_for_wanted',
             'SPOTIFY_CLIENT_ID': 'spotify_client_id',
             'SPOTIFY_CLIENT_SECRET': 'spotify_client_secret',
+            'DISCOGS_TOKEN': 'discogs_token',
+            'DISCOGS_CONSUMER_KEY': 'discogs_consumer_key',
+            'DISCOGS_CONSUMER_SECRET': 'discogs_consumer_secret',
+            'ACOUSTID_API_KEY': 'acoustid_api_key',
+            'ACOUSTID_USER_KEY': 'acoustid_user_key',
+            'DISCOGS_METADATA_ENABLED': 'discogs_metadata_enabled',
+            'ACOUSTID_VERIFY_ENABLED': 'acoustid_verify_enabled',
             'POT_PROVIDER_URL': 'pot_provider_url',
             'DENO_PATH': 'deno_path',
             'YT_DLP_CONFIG_FILE': 'ytdlp_config_file',
         }
         bool_keys = {'enable_pot_provider', 'spotify_metadata_enabled',
+                     'discogs_metadata_enabled', 'acoustid_verify_enabled',
                      'wanted_search_enabled', 'stale_cleanup_enabled',
                      'prefer_blissful_for_stale'}
         for env_key, config_key in env_map.items():
@@ -113,6 +121,16 @@ class ConfigManager:
             'spotify_metadata_enabled': False,
             'spotify_client_id': '',
             'spotify_client_secret': '',
+            # Discogs refines the search query; AcoustID verifies downloaded audio.
+            'discogs_metadata_enabled': False,
+            'discogs_token': '',
+            'discogs_consumer_key': '',
+            'discogs_consumer_secret': '',
+            'acoustid_verify_enabled': False,
+            'acoustid_api_key': '',
+            'acoustid_user_key': '',
+            'acoustid_fpcalc_path': '',
+            'acoustid_min_score': 0.75,
             # Optional API token. Off by default; enable when exposing Blissful
             # beyond a trusted LAN/VPN. BLISSFUL_AUTH_TOKEN env wins.
             'auth_token': '',
@@ -266,12 +284,19 @@ class ConfigManager:
             validated['embed_thumbnail'] = bool(config['embed_thumbnail'])
         
         if 'source_priorities' in config and isinstance(config['source_priorities'], list):
-            # Spotify is metadata-only in this fork; drop stale saved entries.
+            # Spotify/Discogs/AcoustID are metadata providers, not download
+            # sources; drop stale saved entries.
+            def _is_metadata_source(source):
+                if not isinstance(source, dict):
+                    return False
+                text = (str(source.get('name', '')) + ' ' +
+                        str(source.get('search', ''))).lower()
+                return any(k in text for k in
+                           ('spotify', 'discog', 'acoustid', 'chromaprint'))
+
             validated['source_priorities'] = [
                 source for source in config['source_priorities']
-                if not isinstance(source, dict)
-                or ('spotify' not in str(source.get('name', '')).lower()
-                    and 'spotify' not in str(source.get('search', '')).lower())
+                if not _is_metadata_source(source)
             ]
         
         # Request system settings
@@ -312,7 +337,8 @@ class ConfigManager:
             validated['request_search_missing'] = bool(config['request_search_missing'])
         
         # Metadata provider, API token and yt-dlp runtime settings.
-        for key in ('spotify_metadata_enabled', 'enable_pot_provider',
+        for key in ('spotify_metadata_enabled', 'discogs_metadata_enabled',
+                    'acoustid_verify_enabled', 'enable_pot_provider',
                     'validate_duration', 'use_lidarr_naming', 'enable_jobs',
                     'auto_retry_failed', 'wanted_search_enabled',
                     'stale_cleanup_enabled', 'prefer_blissful_for_stale',
@@ -320,13 +346,17 @@ class ConfigManager:
                     'prefer_blissful_for_wanted'):
             if key in config:
                 validated[key] = bool(config[key])
-        for key in ('spotify_client_id', 'spotify_client_secret', 'auth_token'):
+        for key in ('spotify_client_id', 'spotify_client_secret', 'auth_token',
+                    'discogs_token', 'discogs_consumer_key',
+                    'discogs_consumer_secret', 'acoustid_api_key',
+                    'acoustid_user_key'):
             if key in config:
                 value = config[key]
                 if value in ('***KEEP_EXISTING***', '***MASKED***'):
                     continue
                 validated[key] = str(value)
-        for key in ('pot_provider_url', 'deno_path', 'ytdlp_config_file'):
+        for key in ('pot_provider_url', 'deno_path', 'ytdlp_config_file',
+                    'acoustid_fpcalc_path'):
             if key in config:
                 validated[key] = str(config[key])
         if 'ytdlp_extractor_args' in config and isinstance(config['ytdlp_extractor_args'], dict):
@@ -338,6 +368,13 @@ class ConfigManager:
                 deviation = float(config['max_duration_deviation'])
                 if 0 <= deviation <= 1:
                     validated['max_duration_deviation'] = deviation
+            except (ValueError, TypeError):
+                pass
+        if 'acoustid_min_score' in config:
+            try:
+                score = float(config['acoustid_min_score'])
+                if 0 <= score <= 1:
+                    validated['acoustid_min_score'] = score
             except (ValueError, TypeError):
                 pass
         if 'job_retention_days' in config:
