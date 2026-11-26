@@ -248,13 +248,14 @@ Metadata providers never serve audio. Each has its own checkbox under
 | Spotify | Refines the pre-download query with artist/title/album/year. | Client ID + secret |
 | Discogs | Looks up the release in the Discogs database and adds its year/edition to the query. | Personal access token, or consumer key + secret |
 | AcoustID | After download, fingerprints the file with Chromaprint (`fpcalc`) and rejects it when the identified recording does not match. | Application key (`client`); user key required from 1 Jan 2027 |
+| MusicBrainz | Resolves the exact recording, release and year to refine the query. No account needed. | None (identifying User-Agent required; 1 request/second) |
 
 > **AcoustID has no text search.** Its API only looks up audio fingerprints, so
 > it cannot refine a query before a file exists. With its checkbox enabled,
 > Blissful fingerprints each otherwise-accepted candidate; a low score or a
 > mismatched artist/title deletes that candidate and the next source is tried.
-> Artwork-only differences are ignored. Spotify and Discogs are the providers
-> that refine the search query.
+> Artwork-only differences are ignored. Spotify, Discogs and MusicBrainz are
+> the providers that refine the search query.
 
 - `fpcalc` comes from `libchromaprint-tools`, baked into the published image.
   For local installs, install that package or set `acoustid_fpcalc_path`.
@@ -263,7 +264,8 @@ Metadata providers never serve audio. Each has its own checkbox under
 - Keys can be entered in the UI or supplied via environment variables:
   `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET`, `DISCOGS_TOKEN`,
   `DISCOGS_CONSUMER_KEY`, `DISCOGS_CONSUMER_SECRET`, `ACOUSTID_API_KEY`,
-  `ACOUSTID_USER_KEY`. Environment values win over saved config, and all
+  `ACOUSTID_USER_KEY`, `MUSICBRAINZ_METADATA_ENABLED`. Environment values win
+  over saved config, and all
   secrets are masked in `/api/config`.
 - Providers are independent and optional: enable only the ones you have keys for.
 

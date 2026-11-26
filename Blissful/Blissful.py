@@ -29,6 +29,7 @@ from extend.system_utils import SystemUtils
 from extend.spotify_client import SpotifyClient
 from extend.discogs_client import DiscogsClient
 from extend.acoustid_client import AcoustIDClient
+from extend.musicbrainz_client import MusicBrainzClient
 from extend.auth import install_auth, is_enabled
 from extend.job_manager import JobManager
 from extend.wanted_search import WantedSearchService
@@ -90,10 +91,12 @@ config_manager = ConfigManager()
 spotify_client = SpotifyClient(config_manager)
 discogs_client = DiscogsClient(config_manager)
 acoustid_client = AcoustIDClient(config_manager)
+musicbrainz_client = MusicBrainzClient(config_manager)
 download_manager = DownloadManager(config_manager=config_manager,
                                     spotify_client=spotify_client,
                                     discogs_client=discogs_client,
-                                    acoustid_client=acoustid_client)
+                                    acoustid_client=acoustid_client,
+                                    musicbrainz_client=musicbrainz_client)
 audio_converter = AudioConverter()
 source_manager = SourceManager()
 

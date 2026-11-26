@@ -26,7 +26,8 @@
     <div class="card">
         <h2>🎧 Metadata Providers</h2>
         <p class="help-text">
-            Metadata providers do not serve audio. Spotify and Discogs refine the query
+            Metadata providers do not serve audio. Spotify, Discogs and MusicBrainz
+            refine the query
             before Blissful asks YouTube, YouTube Music, SoundCloud or Bandcamp for the
             track. AcoustID fingerprints the downloaded file and rejects it when it does
             not match the expected recording.
@@ -89,6 +90,15 @@
                     <small>0 to 1; higher is stricter. A candidate is accepted when its artist and title match at or above this score.</small>
                 </div>
             </div>
+        </div>
+        <div class="form-group metadata-provider-card">
+            <label for="musicbrainzMetadataEnabled" class="metadata-provider-label">
+                <input type="checkbox" id="musicbrainzMetadataEnabled">
+                <span class="metadata-provider-text">
+                    <strong>Use MusicBrainz as a metadata source</strong>
+                    <small>Optional, no account needed. Looks up the exact recording, release and year to sharpen searches before download. MusicBrainz is public and rate-limited to one request per second.</small>
+                </span>
+            </label>
         </div>
     </div>
 </div>

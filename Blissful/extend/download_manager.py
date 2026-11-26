@@ -38,6 +38,7 @@ class DownloadManager:
         spotify_client: Any = None,
         discogs_client: Any = None,
         acoustid_client: Any = None,
+        musicbrainz_client: Any = None,
     ):
         """
         Initialize download manager.
@@ -48,6 +49,7 @@ class DownloadManager:
             spotify_client: Optional metadata-only SpotifyClient
             discogs_client: Optional metadata-only DiscogsClient (query refinement)
             acoustid_client: Optional AcoustIDClient (post-download verification)
+            musicbrainz_client: Optional MusicBrainzClient (query refinement)
         """
         self.download_dir = Path(download_dir)
         self.download_dir.mkdir(parents=True, exist_ok=True)
@@ -60,6 +62,7 @@ class DownloadManager:
         self.spotify_client = spotify_client
         self.discogs_client = discogs_client
         self.acoustid_client = acoustid_client
+        self.musicbrainz_client = musicbrainz_client
 
     # ------------------------------------------------------------------
     # Configuration helpers
@@ -378,6 +381,23 @@ class DownloadManager:
                     except Exception:
                         logger.debug('Could not build Discogs-backed search query')
 
+            if self._as_bool(self._cfg('musicbrainz_metadata_enabled', False), False) \
+                    and self.musicbrainz_client is not None:
+                try:
+                    recording = self.musicbrainz_client.resolve_track(
+                        artist, title, album=album or None)
+                except Exception:
+                    logger.debug('MusicBrainz lookup unavailable; using current query')
+                    recording = None
+                if recording:
+                    try:
+                        refined = self.musicbrainz_client.build_search_query(recording)
+                        if refined:
+                            search_query = refined
+                            metadata_source = 'musicbrainz'
+                    except Exception:
+                        logger.debug('Could not build MusicBrainz-backed search query')
+
             logger.info(f"Searching for: {search_query} (metadata: {metadata_source})")
 
             if source_priorities:
@@ -570,7 +590,8 @@ class DownloadManager:
 
             # Discogs/AcoustID: metadata only - never download sources.
             elif ('discog' in name or 'discogs.com' in search
-                  or 'acoustid' in name or 'acoustid.org' in search):
+                  or 'acoustid' in name or 'acoustid.org' in search
+                  or 'musicbrainz' in name or 'musicbrainz.org' in search):
                 continue
 
             # Apple Music

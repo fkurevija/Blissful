@@ -69,6 +69,7 @@ class ConfigManager:
             'ACOUSTID_API_KEY': 'acoustid_api_key',
             'ACOUSTID_USER_KEY': 'acoustid_user_key',
             'SEARCH_RESULTS_PER_SOURCE': 'search_results_per_source',
+            'MUSICBRAINZ_METADATA_ENABLED': 'musicbrainz_metadata_enabled',
             'DISCOGS_METADATA_ENABLED': 'discogs_metadata_enabled',
             'ACOUSTID_VERIFY_ENABLED': 'acoustid_verify_enabled',
             'POT_PROVIDER_URL': 'pot_provider_url',
@@ -77,6 +78,7 @@ class ConfigManager:
         }
         bool_keys = {'enable_pot_provider', 'spotify_metadata_enabled',
                      'discogs_metadata_enabled', 'acoustid_verify_enabled',
+                     'musicbrainz_metadata_enabled',
                      'wanted_search_enabled', 'stale_cleanup_enabled',
                      'prefer_blissful_for_stale'}
         int_keys = {'search_results_per_source'}
@@ -133,6 +135,8 @@ class ConfigManager:
             'discogs_token': '',
             'discogs_consumer_key': '',
             'discogs_consumer_secret': '',
+            'musicbrainz_metadata_enabled': False,
+            'musicbrainz_user_agent': '',
             'acoustid_verify_enabled': False,
             'acoustid_api_key': '',
             'acoustid_user_key': '',
@@ -301,7 +305,7 @@ class ConfigManager:
                 text = (str(source.get('name', '')) + ' ' +
                         str(source.get('search', ''))).lower()
                 return any(k in text for k in
-                           ('spotify', 'discog', 'acoustid', 'chromaprint'))
+                           ('spotify', 'discog', 'acoustid', 'chromaprint', 'musicbrainz', 'mbid'))
 
             validated['source_priorities'] = [
                 source for source in config['source_priorities']
@@ -347,7 +351,8 @@ class ConfigManager:
         
         # Metadata provider, API token and yt-dlp runtime settings.
         for key in ('spotify_metadata_enabled', 'discogs_metadata_enabled',
-                    'acoustid_verify_enabled', 'enable_pot_provider',
+                    'acoustid_verify_enabled', 'musicbrainz_metadata_enabled',
+                    'enable_pot_provider',
                     'validate_duration', 'use_lidarr_naming', 'enable_jobs',
                     'auto_retry_failed', 'wanted_search_enabled',
                     'stale_cleanup_enabled', 'prefer_blissful_for_stale',
@@ -365,7 +370,7 @@ class ConfigManager:
                     continue
                 validated[key] = str(value)
         for key in ('pot_provider_url', 'deno_path', 'ytdlp_config_file',
-                    'acoustid_fpcalc_path'):
+                    'acoustid_fpcalc_path', 'musicbrainz_user_agent'):
             if key in config:
                 validated[key] = str(config[key])
         if 'ytdlp_extractor_args' in config and isinstance(config['ytdlp_extractor_args'], dict):

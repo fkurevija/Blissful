@@ -151,6 +151,9 @@ async function loadConfiguration() {
         document.getElementById('acoustidMinScore').value =
             (minScore === undefined || minScore === null) ? '0.75' : String(minScore);
 
+        document.getElementById('musicbrainzMetadataEnabled').checked =
+            config.musicbrainz_metadata_enabled || false;
+
         // Optional API token
         const tokenField = document.getElementById('authToken');
         if (config.auth_token === '***MASKED***') {
@@ -240,6 +243,8 @@ async function saveConfiguration() {
             acoustid_api_key: document.getElementById('acoustidApiKey').value.trim(),
             acoustid_user_key: document.getElementById('acoustidUserKey').value.trim(),
             acoustid_min_score: acoustidMinScore,
+            musicbrainz_metadata_enabled:
+                document.getElementById('musicbrainzMetadataEnabled').checked,
             
             lidarr_path_mapping: getPathMappings(),
             source_priorities: getSourcePriorities(),
