@@ -150,3 +150,23 @@ def test_job_manager_passes_live_progress_callback(tmp_path):
     stored = manager.get_job(job['id'])
     assert stored['status'] == 'succeeded'
     assert stored['progress']['completed_tracks'] == 1
+
+
+def test_cancel_active_cancels_this_runs_jobs_only(tmp_path):
+    manager = make_manager(tmp_path)
+    parent, _ = manager.enqueue('cleanup', {'mode': 'stale-cleanup'})
+    manager.update_job(parent['id'], status='running')
+    child, _ = manager.enqueue('album', {'artist': 'A', 'album': 'B'},
+                               parent_id=parent['id'])
+    manager.update_job(child['id'], status='running')
+    unrelated, _ = manager.enqueue('album', {'artist': 'X', 'album': 'Y'})
+    manager.update_job(unrelated['id'], status='running')
+
+    service = WantedSearchService(ConfigStub(), object, job_manager=manager)
+    service._active = {'kind': 'cleanup', 'run_job_id': parent['id'],
+                       'phase': 'download job running'}
+    assert service.cancel_active() is True
+    assert manager.get_job(parent['id'])['status'] == 'cancelled'
+    assert manager.get_job(child['id'])['status'] == 'cancelled'
+    assert manager.get_job(unrelated['id'])['status'] == 'running'
+    assert service._cancel_event.is_set()

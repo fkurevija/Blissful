@@ -645,7 +645,9 @@ runs retry on the same job indefinitely when the run itself fails. Retries use
 capped exponential backoff (30s, 1m, 2m, 4m, then 5m maximum, with jitter) so
 rate limits are respected; the Downloads tab shows `retry Ns` on pending jobs.
 **Cancel** on a pending or running job stops further retries permanently —
-cancelled jobs are never revived. Retries do not survive a container restart:
+cancelled jobs are never revived. Cancelling an active wanted/cleanup run also
+cancels all of that run's pending or running child jobs. Retries do not survive
+a container restart:
 jobs left running at shutdown are marked cancelled on startup.
 
 Job state, log entries and the details progress bar all report the same

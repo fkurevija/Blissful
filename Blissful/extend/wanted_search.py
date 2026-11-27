@@ -388,15 +388,32 @@ class WantedSearchService:
 
         self._cancel_event.set()
 
-        # Cancel the run's pending/running download job so the poll loop
-
-        # unblocks immediately rather than at timeout.
+        # Cancel this run's top-level job and every child job, including
+        # ones created after an earlier cancel request. Never touch jobs
+        # from another run.
 
         if self.job_manager is not None:
 
             try:
 
-                for job_id in list(self._run_job_ids):
+                job_ids = set(self._run_job_ids)
+
+                run_job_id = (active or {}).get('run_job_id')
+
+                if run_job_id:
+
+                    job_ids.add(run_job_id)
+
+                    for job in self.job_manager.list_jobs(
+
+                            limit=500, include_children=True):
+
+                        if job.get('parent_id') == run_job_id:
+
+                            job_ids.add(job['id'])
+
+                for job_id in job_ids:
+
                     self.job_manager.cancel_job(job_id)
             except Exception:
 
@@ -1176,6 +1193,7 @@ class WantedSearchService:
                 }, dedupe_key='wanted-search-run-%s' % time.time())
                 if search_job:
                     self._run_job_ids.add(search_job['id'])
+                    self._set_active(run_job_id=search_job['id'])
 
                 if search_job:
 
@@ -1656,6 +1674,7 @@ class WantedSearchService:
 
                 if cleanup_job:
                     self._run_job_ids.add(cleanup_job['id'])
+                    self._set_active(run_job_id=cleanup_job['id'])
 
                     self.job_manager.update_job(cleanup_job['id'],
 
@@ -2116,7 +2135,6 @@ class WantedSearchService:
                              'kept', 'skipped', 'errors')}
 
         self._finish_active('completed' if not report['errors'] else 'completed with errors')
-        self._run_job_ids.clear()
 
         if cleanup_job_id:
 
