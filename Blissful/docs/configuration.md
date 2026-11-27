@@ -651,6 +651,7 @@ a container restart:
 jobs left running at shutdown are marked cancelled on startup.
 
 Job state, log entries and the details progress bar all report the same
-`completed/total tracks` counter, plus the current retry round. A job whose
-tracks keep failing holds the single worker between rounds; cancel it to free
-the queue for other jobs.
+`completed/total tracks` counter, plus the current retry round. Each failed
+round requeues the job with its remaining tracks instead of holding the
+single worker, so other jobs and manual retries keep moving. Cancelling a
+job clears its stale result and stamps it as finished.

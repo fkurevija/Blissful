@@ -172,28 +172,32 @@ class AlbumManager:
             }
     
     def download_album(self, artist, album, tracks, target_path='',
-                       should_cancel=None, retry_delay=None, on_progress=None):
+                       should_cancel=None, retry_delay=None, on_progress=None,
+                       resume_state=None):
         """Download every track, retrying only the failures in later rounds.
 
         A failed track never blocks the rest of the album: it is left pending
-        and picked up again on the next round. Job-managed calls pass
-        ``should_cancel`` so a user cancellation stops the loop immediately.
-        Direct (synchronous) calls keep the original single-pass behaviour.
+        and returned in ``pending_tracks`` for the next round. Job-managed
+        calls run one round per worker pass so other jobs (including retries)
+        are not blocked; ``should_cancel`` stops a round immediately.
         """
         try:
             logger.info(f"Downloading album: {artist} - {album} ({len(tracks)} tracks)")
             total = len(tracks)
             managed = callable(should_cancel)
+            resume_state = resume_state if isinstance(resume_state, dict) else {}
+            rounds_done = int(resume_state.get('rounds', 0))
+            completed_before = int(resume_state.get('completed_tracks', 0))
             results = {
                 'success': True,
                 'cancelled': False,
                 'album': album,
                 'artist': artist,
                 'total_tracks': total,
-                'completed_tracks': 0,
-                'successful': 0,
+                'completed_tracks': completed_before,
+                'successful': completed_before,
                 'failed': 0,
-                'rounds': 0,
+                'rounds': rounds_done,
                 'tracks': [],
             }
             config = self.config_manager.get_config()
@@ -203,21 +207,6 @@ class AlbumManager:
 
             def cancelled():
                 return bool(managed and should_cancel())
-
-            def wait_before_round(round_no):
-                if not managed:
-                    return
-                try:
-                    seconds = (retry_delay(round_no) if callable(retry_delay)
-                               else min(300.0, 30.0 * (2 ** (round_no - 1)))
-                               * random.uniform(0.8, 1.2))
-                except (TypeError, ValueError):
-                    seconds = 30.0
-                deadline = time.monotonic() + max(0.0, float(seconds))
-                while time.monotonic() < deadline:
-                    if cancelled():
-                        return
-                    time.sleep(min(1.0, max(0.0, deadline - time.monotonic())))
 
             def progress(round_no, phase='track'):
                 details = {
@@ -331,19 +320,22 @@ class AlbumManager:
                 results['failed'] = len(pending)
                 progress(results['rounds'],
                          'retry-round' if pending else 'complete')
-                if not managed and pending:
-                    break
                 if pending and not cancelled():
                     logger.info(
-                        'Album %s - %s: %s/%s tracks complete, %s left; retry round %s',
+                        'Album %s - %s: %s/%s tracks complete, %s left; next retry round',
                         artist, album, results['completed_tracks'], total,
-                        len(pending), results['rounds'] + 1)
-                    wait_before_round(results['rounds'])
+                        len(pending))
+                break  # one round per worker pass; the manager reschedules failures
 
             results['tracks'] = completed + [
                 failures[id(t)] for t in pending if id(t) in failures]
             results['failed'] = len(pending)
             results['success'] = not pending and not results['cancelled']
+            results['pending_tracks'] = pending
+            results['resume_state'] = {
+                'rounds': results['rounds'],
+                'completed_tracks': results['completed_tracks'],
+            }
             return results
         except Exception as e:
             logger.error(f"Error downloading album: {e}", exc_info=True)

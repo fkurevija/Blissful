@@ -94,15 +94,21 @@ def make_album_manager(fail_once):
 
 def test_album_loop_skips_failed_track_then_completes_it():
     manager, downloads = make_album_manager(['A'])
-    result = manager.download_album(
+    first = manager.download_album(
         'Artist', 'Album', [{'title': 'A'}, {'title': 'B'}],
-        should_cancel=lambda: False, retry_delay=lambda round_no: 0)
+        should_cancel=lambda: False)
+    assert downloads.calls == ['A', 'B']
+    assert first['success'] is False
+    assert first['completed_tracks'] == 1
+    assert first['pending_tracks'] == [{'title': 'A'}]
+    second = manager.download_album(
+        'Artist', 'Album', first['pending_tracks'],
+        should_cancel=lambda: False, resume_state=first['resume_state'])
     assert downloads.calls == ['A', 'B', 'A']
-    assert result['success'] is True
-    assert result['completed_tracks'] == 2
-    assert result['successful'] == 2
-    assert result['failed'] == 0
-    assert result['rounds'] == 2
+    assert second['success'] is True
+    assert second['completed_tracks'] == 2
+    assert second['successful'] == 2
+    assert second['rounds'] == 2
     assert downloads.progress[-1]['download_index'] == 2
 
 
@@ -110,11 +116,10 @@ def test_album_loop_stops_when_cancelled():
     manager, downloads = make_album_manager(['A'])
     result = manager.download_album(
         'Artist', 'Album', [{'title': 'A'}, {'title': 'B'}],
-        should_cancel=lambda: len(downloads.progress) >= 2,
-        retry_delay=lambda round_no: 0)
+        should_cancel=lambda: True)
     assert result['cancelled'] is True
     assert result['success'] is False
-    assert result['completed_tracks'] == 1
+    assert result['completed_tracks'] == 0
 
 
 def test_album_loop_reports_progress_callback():
@@ -126,8 +131,8 @@ def test_album_loop_reports_progress_callback():
         on_progress=lambda **details: seen.append(details))
     assert any(d.get('completed_tracks') == 1 and d.get('total_tracks') == 2
                for d in seen)
-    assert seen[-1]['completed_tracks'] == 2
-    assert seen[-1]['round'] == 2
+    assert seen[-1]['completed_tracks'] == 1
+    assert seen[-1]['round'] == 1
 
 
 def test_job_manager_passes_live_progress_callback(tmp_path):
@@ -170,3 +175,42 @@ def test_cancel_active_cancels_this_runs_jobs_only(tmp_path):
     assert manager.get_job(child['id'])['status'] == 'cancelled'
     assert manager.get_job(unrelated['id'])['status'] == 'running'
     assert service._cancel_event.is_set()
+
+
+def test_worker_reschedules_failed_tracks_without_blocking_queue(tmp_path):
+    class RoundAlbum:
+        def download_album(self, **kwargs):
+            return {'success': False, 'completed_tracks': 1, 'total_tracks': 2,
+                    'successful': 1, 'failed': 1, 'rounds': 1, 'tracks': [],
+                    'pending_tracks': [{'title': 'B'}],
+                    'resume_state': {'rounds': 1, 'completed_tracks': 1}}
+
+    manager = JobManager(ConfigStub(), RoundAlbum(),
+                         storage_path=str(tmp_path / 'jobs.json'))
+    other, _ = manager.enqueue('album', {'artist': 'X', 'album': 'Y'})
+    job, _ = manager.enqueue('album', {'artist': 'A', 'album': 'B'})
+    manager._process(manager._next_pending())
+    stored = manager.get_job(job['id'])
+    assert stored['status'] == 'pending'
+    assert stored['next_attempt_at'] > time.time()
+    assert stored['payload']['pending_tracks'] == [{'title': 'B'}]
+    assert manager._next_pending()['id'] == other['id']
+
+
+def test_cancel_stamps_finished_at_and_retry_clears_stale_fields(tmp_path):
+    manager = make_manager(tmp_path)
+    job, _ = manager.enqueue('album', {'artist': 'A', 'album': 'B'})
+    manager.update_job(job['id'], status='running')
+    assert manager.cancel_job(job['id'])
+    cancelled = manager.get_job(job['id'])
+    assert cancelled['status'] == 'cancelled'
+    assert cancelled['finished_at']
+    assert (cancelled.get('log') or [])[-1]['phase'] == 'cancelled'
+    manager.update_job(job['id'], result={'successful': 0}, progress={'phase': 'failed'})
+    _, changed = manager.retry(job['id'])
+    assert changed is True
+    retried = manager.get_job(job['id'])
+    assert retried['status'] == 'pending'
+    assert 'finished_at' not in retried
+    assert 'result' not in retried
+    assert retried['next_attempt_at'] <= time.time()

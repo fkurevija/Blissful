@@ -156,6 +156,8 @@ class JobManager:
                     job['status'] = 'cancelled'
                     job['failure_reason'] = 'cancelled by user'
                     job['updated_at'] = _now()
+                    job['finished_at'] = _now()
+                    self._append_log_locked(job, 'cancelled')
                     self._persist()
                     return True
             return False
@@ -190,6 +192,13 @@ class JobManager:
                     job['updated_at'] = _now()
                     job['attempts'] = int(job.get('attempts', 0)) + 1
                     job['next_attempt_at'] = time.time()
+                    job.pop('finished_at', None)
+                    job.pop('result', None)
+                    job.pop('progress', None)
+                    payload = dict(job.get('payload') or {})
+                    payload.pop('pending_tracks', None)
+                    payload.pop('resume_state', None)
+                    job['payload'] = payload
                     self._persist()
                     return dict(job), True
         return None, False
@@ -423,8 +432,9 @@ class JobManager:
                 result = self.album_manager.download_album(
                     artist=payload.get('artist', ''),
                     album=payload.get('album', ''),
-                    tracks=payload.get('tracks', []),
+                    tracks=payload.get('pending_tracks') or payload.get('tracks', []),
                     target_path=payload.get('target_path', ''),
+                    resume_state=payload.get('resume_state'),
                     should_cancel=lambda: (
                         (self.get_job(job['id']) or {}).get('status') == 'cancelled'),
                     retry_delay=self.retry_delay,
@@ -435,6 +445,10 @@ class JobManager:
                 result = {'success': False, 'error': f"Unknown job type: {job.get('kind')}"}
             if result.get('cancelled'):
                 status, reason = 'cancelled', 'cancelled by user'
+            elif result.get('pending_tracks'):
+                # Some tracks failed this round; requeue this job so the
+                # single worker can serve other jobs and retries in between.
+                status, reason = 'pending', None
             else:
                 status = 'succeeded' if result.get('success') else 'failed'
             failures = [{
@@ -484,11 +498,22 @@ class JobManager:
                             'current_track': completed,
                             'total_tracks': total,
                         }
-                    current['finished_at'] = _now()
+                    if status == 'pending':
+                        embedded = dict(current.get('payload') or {})
+                        embedded['pending_tracks'] = result.get('pending_tracks')
+                        embedded['resume_state'] = result.get('resume_state')
+                        current['payload'] = embedded
+                        current['next_attempt_at'] = time.time() + self.retry_delay(
+                            (result or {}).get('rounds', 1))
+                        current.pop('finished_at', None)
+                    else:
+                        current['finished_at'] = _now()
                     current['updated_at'] = _now()
                     break
             self._persist()
-        self.append_log(job['id'], 'job finished', status=status,
+        self.append_log(job['id'],
+                        'retry round scheduled' if status == 'pending'
+                        else 'job finished', status=status,
                         completed=(result or {}).get('completed_tracks')
                         if isinstance(result, dict) else None,
                         total=(result or {}).get('total_tracks')
