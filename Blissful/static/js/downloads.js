@@ -39,6 +39,58 @@ function jobLabel(job) {
     return album || artist || job.dedupe_key || job.id;
 }
 
+async function retryJobTrack(jobId, title) {
+    try {
+        const res = await fetch(`/api/jobs/${encodeURIComponent(jobId)}/retry-track`, {
+            method: 'POST', headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({ title })
+        });
+        const data = await res.json();
+        if (!res.ok || !data.success) throw new Error(data.error || `HTTP ${res.status}`);
+        showNotification(`Retrying ${title}`, 'success');
+        await loadJobs();
+    } catch (error) {
+        showNotification(`Retry failed: ${error.message}`, 'error');
+    }
+}
+window.retryJobTrack = retryJobTrack;
+
+function renderFailedTracks(jobs) {
+    const list = document.getElementById('failedTracksList');
+    if (!list) return;
+    list.innerHTML = '';
+    const rows = [];
+    (jobs || []).forEach(job => {
+        if (job.status === 'succeeded') return;
+        const failures = (job.result || {}).failures || [];
+        failures.forEach(track => rows.push({ job, track }));
+    });
+    if (!rows.length) {
+        list.innerHTML = '<em>No failed tracks.</em>';
+        return;
+    }
+    rows.forEach(({ job, track }) => {
+        const title = track.title || 'track';
+        const row = document.createElement('div');
+        row.className = 'failed-track-row';
+        const info = document.createElement('div');
+        info.className = 'failed-track-info';
+        info.textContent = `${jobLabel(job)} — ${title}`;
+        const error = document.createElement('div');
+        error.className = 'failed-track-error';
+        error.textContent = String(track.error || '').slice(0, 180);
+        info.appendChild(error);
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'btn btn-sm';
+        button.textContent = 'Retry track';
+        button.addEventListener('click', () => retryJobTrack(job.id, title));
+        row.appendChild(info);
+        row.appendChild(button);
+        list.appendChild(row);
+    });
+}
+
 function renderJobs(jobs) {
     const list = document.getElementById('jobsList');
     const summary = document.getElementById('jobsSummary');
@@ -55,6 +107,7 @@ function renderJobs(jobs) {
         if (counts[job.status] !== undefined) counts[job.status] += 1;
     });
     summary.textContent = `Pending ${counts.pending} · Running ${counts.running} · Succeeded ${counts.succeeded} · Failed ${counts.failed}`;
+    renderFailedTracks(currentJobs);
     list.innerHTML = '';
     if (!currentJobs.length) {
         list.innerHTML = '<div style="padding:12px"><em>No jobs yet.</em></div>';
@@ -403,6 +456,12 @@ function renderJobDetails(job) {
                 const line = document.createElement('div');
                 line.className = 'job-detail-line';
                 line.textContent = `  - ${f.title || 'track'}: ${f.error || ''}`;
+                const retry = document.createElement('button');
+                retry.type = 'button';
+                retry.className = 'btn btn-sm';
+                retry.textContent = 'Retry track';
+                retry.addEventListener('click', () => retryJobTrack(job.id, f.title || 'track'));
+                line.appendChild(retry);
                 body.appendChild(line);
                 attempts.forEach(a => {
                     const al = document.createElement('div');
@@ -708,12 +767,17 @@ function showJobDetails(jobId) {
             <div class="job-details-body"></div>
             <div class="job-details-footer">
                 <button type="button" class="btn btn-secondary job-details-copy-md">Copy Markdown</button>
+                <button type="button" class="btn btn-secondary job-details-jump">Jump to last</button>
                 <button type="button" class="btn btn-secondary job-details-copy">Copy logs</button>
             </div>
         `;
         pane.querySelector('.job-details-close').addEventListener('click', closeJobDetails);
         pane.querySelector('.job-details-copy').addEventListener('click', e => copyText(detailsPlainText, e.currentTarget));
         pane.querySelector('.job-details-copy-md').addEventListener('click', e => copyText(detailsMarkdown, e.currentTarget));
+        pane.querySelector('.job-details-jump').addEventListener('click', () => {
+            const log = detailsPane.querySelector('.job-details-log');
+            if (log) { log.scrollTop = log.scrollHeight; log.dataset.init = '1'; }
+        });
         document.getElementById('jobsList').parentElement.appendChild(pane);
         detailsPane = pane;
         document.addEventListener('keydown', e => {

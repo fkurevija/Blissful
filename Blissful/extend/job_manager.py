@@ -35,6 +35,7 @@ class JobManager:
         self._lock = threading.RLock()
         self._stop = threading.Event()
         self._thread = None
+        self._threads = []
         # Only these kinds are executed by the built-in worker; other kinds
         # (e.g. a long-running API search) are driven by their own service.
         self.managed_kinds = {'album'}
@@ -271,13 +272,14 @@ class JobManager:
         return removed
 
     # ------------------------------------------------------------------ worker
-    def start_worker(self, poll_interval=2.0):
+    def start_worker(self, poll_interval=2.0, workers=2):
         if not self.config_manager.get_setting('enable_jobs', True):
             logger.info("Job worker disabled by configuration; jobs can still be enqueued")
             return
         if self._thread and self._thread.is_alive():
             return
         self._stop.clear()
+        self._threads = []
 
         def run():
             logger.info("Job worker started")
@@ -293,13 +295,19 @@ class JobManager:
                     self._stop.wait(poll_interval)
             logger.info("Job worker stopped")
 
-        self._thread = threading.Thread(target=run, name='blissful-jobs', daemon=True)
-        self._thread.start()
+        for number in range(max(1, int(workers))):
+            thread = threading.Thread(
+                target=run, name=f'blissful-jobs-{number + 1}', daemon=True)
+            self._threads.append(thread)
+            thread.start()
+        self._thread = self._threads[0]
 
     def stop_worker(self):
         self._stop.set()
-        if self._thread:
-            self._thread.join(timeout=5)
+        for thread in self._threads:
+            thread.join(timeout=5)
+        self._threads = []
+        self._thread = None
 
     @staticmethod
     def _provider_label(source):
@@ -414,6 +422,12 @@ class JobManager:
             for job in self.jobs:
                 if job.get('status') != 'pending' or \
                         job.get('kind') not in self.managed_kinds:
+                    continue
+                # Two workers must not download the same album at once.
+                if any(other.get('status') == 'running'
+                       and other.get('dedupe_key') == job.get('dedupe_key')
+                       and other.get('id') != job.get('id')
+                       for other in self.jobs):
                     continue
                 due = job.get('next_attempt_at')
                 if isinstance(due, (int, float)) and due > now:

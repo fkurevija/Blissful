@@ -211,24 +211,19 @@ class WantedSearchService:
 
         self._last_scheduled = 0.0
 
-        self._active = None
-
+        # One run per kind may be active; a search and a cleanup can overlap.
+        self._active_by_kind = {'search': None, 'cleanup': None}
         self._last_activity = None
-
         self._active_lock = threading.Lock()
-
-        self._run_lock = threading.Lock()
-
-        # Set by cancel_active() to stop an in-flight search/cleanup run.
-
-        self._cancel_event = threading.Event()
+        self._run_locks = {
+            'search': threading.Lock(), 'cleanup': threading.Lock()}
+        self._cancel_events = {
+            'search': threading.Event(), 'cleanup': threading.Event()}
+        self._run_job_ids_by_kind = {'search': set(), 'cleanup': set()}
+        self._local = threading.local()
+        self._last_kind = None
+        self._state_lock = threading.Lock()
         self._retry_wake = threading.Event()
-
-        # Job ids belonging to the current run, so cancel_active() only
-        # cancels this run's jobs and not an unrelated new job.
-        self._run_job_ids = set()
-
-
 
     # ------------------------------------------------------------ gap fill
 
@@ -362,182 +357,140 @@ class WantedSearchService:
 
     def search(self, album_ids=None, apply=False, retry_job_id=None) -> dict:
 
-        """Public search entry point; only one run may be active at a time."""
+        """Public search entry point; one search and one cleanup may overlap."""
 
-        if not self._run_lock.acquire(blocking=False):
-
+        kind = 'search'
+        self._local.kind = kind
+        if not self._run_locks[kind].acquire(blocking=False):
             return self._busy_report()
 
-        self._cancel_event.clear()
-
-        self._set_active(kind='search', phase='preparing', started_at=time.time(),
-
+        self._cancel_events[kind].clear()
+        self._run_job_ids_by_kind[kind].clear()
+        self._set_active(kind=kind, phase='preparing', started_at=time.time(),
                          apply=bool(apply))
 
         try:
-
             return self._search_impl(album_ids=album_ids, apply=apply,
                                      retry_job_id=retry_job_id)
-
         finally:
-            self._run_job_ids.clear()
-
-            if self.get_active() is not None:
-
-                status = 'cancelled' if self._cancel_event.is_set() else 'completed'
-
-                self._finish_active(status)
+            if self.get_active(kind) is not None:
+                status = 'cancelled' if self._cancel_events[kind].is_set() else 'completed'
+                self._finish_active(status, kind=kind)
                 self._retry_wake.set()
-
-            self._run_lock.release()
-
-
+            self._run_locks[kind].release()
+            self._local.kind = None
 
     def cleanup_stale(self, record_ids=None, apply=False, wait_minutes=10,
                       retry_job_id=None) -> dict:
 
-        """Public cleanup entry point; only one run may be active at a time."""
+        """Public cleanup entry point; one search and one cleanup may overlap."""
 
-        if not self._run_lock.acquire(blocking=False):
-
+        kind = 'cleanup'
+        self._local.kind = kind
+        if not self._run_locks[kind].acquire(blocking=False):
             return self._busy_report()
 
-        self._cancel_event.clear()
-
-        self._set_active(kind='cleanup', phase='starting', started_at=time.time(),
-
+        self._cancel_events[kind].clear()
+        self._run_job_ids_by_kind[kind].clear()
+        self._set_active(kind=kind, phase='starting', started_at=time.time(),
                          apply=bool(apply))
 
         try:
-
             return self._cleanup_impl(record_ids=record_ids, apply=apply,
-
                                       wait_minutes=wait_minutes,
                                       retry_job_id=retry_job_id)
-
         finally:
-
-            if self.get_active() is not None:
-
-                status = 'cancelled' if self._cancel_event.is_set() else 'failed'
-
-                self._finish_active(status)
+            if self.get_active(kind) is not None:
+                status = 'cancelled' if self._cancel_events[kind].is_set() else 'failed'
+                self._finish_active(status, kind=kind)
                 self._retry_wake.set()
-
-            self._run_lock.release()
-
-
+            self._run_locks[kind].release()
+            self._local.kind = None
 
     # ------------------------------------------------------------- progress
 
-    def cancel_active(self):
+    def cancel_active(self, kind=None):
+        """Cancel one run (or all runs when kind is None)."""
+        kinds = [kind] if kind in self._run_locks else list(self._run_locks)
+        changed = False
+        for run_kind in kinds:
+            active = self.get_active(run_kind)
+            was_running = bool(active) or self._run_locks[run_kind].locked()
+            if not was_running:
+                continue
+            self._cancel_events[run_kind].set()
+            if self.job_manager is not None:
+                try:
+                    job_ids = set(self._run_job_ids_by_kind[run_kind])
+                    run_job_id = (active or {}).get('run_job_id')
+                    if run_job_id:
+                        job_ids.add(run_job_id)
+                        for job in self.job_manager.list_jobs(
+                                limit=500, include_children=True):
+                            if job.get('parent_id') == run_job_id:
+                                job_ids.add(job['id'])
+                    for job_id in job_ids:
+                        self.job_manager.cancel_job(job_id)
+                except Exception:
+                    pass
+            if active is not None:
+                self._set_active(kind=run_kind, phase='cancelling',
+                                 cancel_requested=True)
+            changed = True
+        return changed
 
-        """Request cancellation of the in-flight run and cancel its job.
+    def _current_kind(self, kind=None):
+        return (kind or getattr(self._local, 'kind', None)
+                or self._last_kind or 'search')
 
+    def _cancel_for(self, kind=None):
+        return self._cancel_events[self._current_kind(kind)]
 
+    def _run_ids_for(self, kind=None):
+        return self._run_job_ids_by_kind[self._current_kind(kind)]
 
-        Loops poll ``_cancel_event`` at album boundaries; the inner
-
-        download job is cancelled too so ``_poll_job`` returns promptly
-
-        instead of waiting for its timeout. Returns True when a run was
-
-        actually in flight.
-
-        """
-
-        active = self.get_active()
-
-        was_running = bool(active) or self._run_lock.locked()
-
-        self._cancel_event.set()
-
-        # Cancel this run's top-level job and every child job, including
-        # ones created after an earlier cancel request. Never touch jobs
-        # from another run.
-
-        if self.job_manager is not None:
-
-            try:
-
-                job_ids = set(self._run_job_ids)
-
-                run_job_id = (active or {}).get('run_job_id')
-
-                if run_job_id:
-
-                    job_ids.add(run_job_id)
-
-                    for job in self.job_manager.list_jobs(
-
-                            limit=500, include_children=True):
-
-                        if job.get('parent_id') == run_job_id:
-
-                            job_ids.add(job['id'])
-
-                for job_id in job_ids:
-
-                    self.job_manager.cancel_job(job_id)
-            except Exception:
-
-                pass
-
-        if active is not None:
-
-            self._set_active(phase='cancelling', cancel_requested=True)
-
-        return bool(was_running)
-
-
-
-    def get_active(self):
-
-        """Snapshot of the in-flight run (safe to read from the web thread)."""
-
+    def get_active(self, kind=None):
+        """Snapshot of a run (defaults to the current or newest run)."""
         with self._active_lock:
+            if kind:
+                active = self._active_by_kind.get(kind)
+                return dict(active) if active else None
+            for key in (getattr(self._local, 'kind', None),
+                        self._last_kind, 'search', 'cleanup'):
+                active = self._active_by_kind.get(key or '')
+                if active:
+                    return dict(active)
+            return None
 
-            return dict(self._active) if self._active else None
-
-
+    def get_actives(self):
+        """Snapshots of all in-flight runs, keyed by kind."""
+        with self._active_lock:
+            return {key: dict(value)
+                    for key, value in self._active_by_kind.items() if value}
 
     def get_last_activity(self):
-
         with self._active_lock:
-
             return dict(self._last_activity) if self._last_activity else None
 
-
-
     def _set_active(self, **updates):
-
+        kind = self._current_kind(updates.get('kind'))
         with self._active_lock:
+            active = dict(self._active_by_kind.get(kind) or {})
+            active.update(updates)
+            active['kind'] = kind
+            active['updated_at'] = time.time()
+            self._active_by_kind[kind] = active
+            self._last_kind = kind
+            return dict(active)
 
-            if self._active is None:
-
-                self._active = {}
-
-            self._active.update(updates)
-
-            self._active['updated_at'] = time.time()
-
-            return dict(self._active)
-
-
-
-    def _finish_active(self, status):
-
+    def _finish_active(self, status, kind=None):
+        kind = self._current_kind(kind)
         with self._active_lock:
-
-            if self._active:
-
-                self._active.update(status=status, finished_at=time.time())
-
-                self._last_activity = dict(self._active)
-
-            self._active = None
-
-
+            active = self._active_by_kind.get(kind)
+            if active:
+                active.update(status=status, finished_at=time.time())
+                self._last_activity = dict(active)
+                self._active_by_kind[kind] = None
 
     # ------------------------------------------------------------------ client
 
@@ -666,21 +619,20 @@ class WantedSearchService:
 
 
     def _save_state(self, state):
-
         try:
-
-            state.setdefault('albums', {})
-
-            state.setdefault('last_run', {})
-
-            self.state_path.parent.mkdir(parents=True, exist_ok=True)
-
-            tmp = self.state_path.with_name(self.state_path.name + '.tmp')
-
-            tmp.write_text(json.dumps(state, indent=2), encoding='utf-8')
-
-            tmp.replace(self.state_path)
-
+            # Two runs can finish at once: merge into the latest on-disk state.
+            with self._state_lock:
+                disk = self._load_state()
+                merged = dict(disk)
+                albums = dict(disk.get('albums') or {})
+                albums.update(state.get('albums') or {})
+                merged['albums'] = albums
+                if state.get('last_run'):
+                    merged['last_run'] = state['last_run']
+                self.state_path.parent.mkdir(parents=True, exist_ok=True)
+                tmp = self.state_path.with_name(self.state_path.name + '.tmp')
+                tmp.write_text(json.dumps(merged, indent=2), encoding='utf-8')
+                tmp.replace(self.state_path)
         except Exception:
 
             # A state write failure must not turn a successful run into an error.
@@ -1155,7 +1107,7 @@ class WantedSearchService:
 
     def _finish_job(self, job_id, job_progress, success, failed, reason, result):
         """Write a run's final status, letting user cancellation win."""
-        if self._cancel_event.is_set():
+        if self._cancel_for().is_set():
             job_progress(status='cancelled', failure_reason='cancelled by user',
                          result=result)
         elif failed and job_id and self.job_manager is not None:
@@ -1268,7 +1220,7 @@ class WantedSearchService:
 
                 }, dedupe_key='wanted-search-run-%s' % time.time())
                 if search_job:
-                    self._run_job_ids.add(search_job['id'])
+                    self._run_ids_for().add(search_job['id'])
                     self._set_active(run_job_id=search_job['id'])
 
                 if search_job:
@@ -1408,7 +1360,7 @@ class WantedSearchService:
 
             for index, item in enumerate(wanted, 1):
 
-                if self._cancel_event.is_set():
+                if self._cancel_for().is_set():
 
                     report['cancelled'] = True
 
@@ -1526,7 +1478,7 @@ class WantedSearchService:
 
         while time.monotonic() < deadline:
 
-            if self._cancel_event.is_set():
+            if self._cancel_for().is_set():
 
                 return {'status': 'cancelled', 'message': 'cancelled by user'}
 
@@ -1576,7 +1528,7 @@ class WantedSearchService:
 
         while time.monotonic() < deadline:
 
-            if self._cancel_event.is_set():
+            if self._cancel_for().is_set():
 
                 return False, 'cancelled by user'
 
@@ -1743,7 +1695,7 @@ class WantedSearchService:
                     dedupe_key='stale-cleanup-run-%s' % time.time())
 
                 if cleanup_job:
-                    self._run_job_ids.add(cleanup_job['id'])
+                    self._run_ids_for().add(cleanup_job['id'])
                     self._set_active(run_job_id=cleanup_job['id'])
 
                     self.job_manager.update_job(cleanup_job['id'],
@@ -1895,7 +1847,7 @@ class WantedSearchService:
 
         for index, (album_id, records) in enumerate(by_album.items(), 1):
 
-            if self._cancel_event.is_set():
+            if self._cancel_for().is_set():
 
                 report['cancelled'] = True
 
@@ -2232,9 +2184,7 @@ class WantedSearchService:
 
             return
 
-        if self.get_active() is not None or self._run_lock.locked():
-
-            return
+        # A run of the other kind may be active; only this kind's slot matters.
 
         now = time.time()
 
@@ -2243,6 +2193,9 @@ class WantedSearchService:
             if job.get('status') != 'pending' or \
                     job.get('kind') not in ('search', 'cleanup'):
 
+                continue
+
+            if self._run_locks[job['kind']].locked():
                 continue
 
             due = job.get('next_attempt_at')

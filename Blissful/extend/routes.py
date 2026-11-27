@@ -269,6 +269,48 @@ def register_routes(app, config_manager, lidarr_client, download_manager,
             wanted_search.wake_retry_dispatcher()
         return jsonify({'success': True, 'job': job, 'restarted': changed})
 
+    @app.route('/api/jobs/<job_id>/retry-track', methods=['POST'])
+    def retry_failed_track(job_id):
+        """Re-queue a single failed track from an existing job."""
+        if not job_manager:
+            return jsonify({'success': False, 'error': 'Job queue unavailable'}), 404
+        job = job_manager.get_job(job_id)
+        if job is None:
+            return jsonify({'success': False, 'error': 'Job not found'}), 404
+        data = request.json or {}
+        title = str(data.get('title') or '').strip()
+        if not title:
+            return jsonify({'success': False, 'error': 'Missing track title'}), 400
+        payload = job.get('payload') or {}
+        tracks = payload.get('tracks') or payload.get('pending_tracks') or []
+        wanted = title.lower()
+        track = next((t for t in tracks
+                      if isinstance(t, dict)
+                      and str(t.get('title') or '').strip().lower() == wanted), None)
+        if track is None:
+            failures = (job.get('result') or {}).get('failures') or []
+            track = next((f for f in failures
+                          if isinstance(f, dict)
+                          and str(f.get('title') or '').strip().lower() == wanted), None)
+        if track is None:
+            return jsonify({'success': False, 'error': 'Track not found in job'}), 404
+        entry = {k: v for k, v in dict(track).items()
+                 if k not in ('success', 'error', 'attempts')}
+        entry.setdefault('title', title)
+        new_payload = {
+            'artist': payload.get('artist', ''),
+            'album': payload.get('album', ''),
+            'album_id': payload.get('album_id'),
+            'tracks': [entry],
+            'target_path': entry.get('target_path') or payload.get('target_path', ''),
+            'source': 'track-retry',
+        }
+        new_job, duplicate = job_manager.enqueue(
+            'album', new_payload,
+            dedupe_key=f"track-retry:{job_id}:{wanted}")
+        return jsonify({'success': True, 'queued': True,
+                        'job': new_job, 'duplicate': duplicate}), 202
+
     @app.route('/api/jobs/<job_id>/cancel', methods=['POST'])
     def cancel_job(job_id):
         if not job_manager:
@@ -446,7 +488,8 @@ def register_routes(app, config_manager, lidarr_client, download_manager,
     def cancel_wanted_run():
         if not wanted_search:
             return jsonify({'success': False, 'error': 'Wanted search unavailable'}), 404
-        cancelled = wanted_search.cancel_active()
+        kind = (request.json or {}).get('kind')
+        cancelled = wanted_search.cancel_active(kind=kind)
         return jsonify({'success': True, 'cancelled': bool(cancelled)})
 
     @app.route('/api/wanted/status', methods=['GET'])
@@ -483,6 +526,8 @@ def register_routes(app, config_manager, lidarr_client, download_manager,
             'wanted_search_timeout_minutes': config.get('wanted_search_timeout_minutes', 10),
             'prefer_blissful_for_wanted': bool(config.get('prefer_blissful_for_wanted', True)),
             'active': active,
+            'runs': (getattr(wanted_search, 'get_actives', lambda: {})()
+                     if wanted_search else {}),
             'last_activity': (wanted_search.get_last_activity()
                               if wanted_search else None),
         })

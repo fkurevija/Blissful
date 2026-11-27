@@ -11,12 +11,22 @@
             <label><input type="checkbox" id="autoRefreshJobs" checked> Auto-refresh</label>
         </div>
         <div id="jobsSummary" class="jobs-summary">Loading…</div>
+        <div class="failed-tracks">
+            <div class="job-detail-heading">Failed tracks</div>
+            <div id="failedTracksList" class="failed-tracks-list"></div>
+        </div>
         <div id="jobsList" class="jobs-list"></div>
     </div>
 </div>
 
 <style>
 .jobs-summary { display: flex; gap: 18px; flex-wrap: wrap; margin: 12px 0; color: var(--muted-foreground); font-size: 13px; }
+.failed-tracks { margin-bottom: 12px; }
+.failed-tracks-list { max-height: 180px; overflow-y: auto; border: 1px solid var(--border); border-radius: 6px; }
+.failed-track-row { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-bottom: 1px solid var(--border); font-size: 13px; }
+.failed-track-row:last-child { border-bottom: none; }
+.failed-track-info { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.failed-track-error { color: var(--muted-foreground); font-size: 12px; }
 .jobs-list { max-height: 520px; overflow-y: auto; border: 1px solid var(--border); border-radius: 6px; }
 .jobs-table { width: 100%; border-collapse: collapse; font-size: 13px; }
 .jobs-table th { position: sticky; top: 0; z-index: 2; background: var(--card, #1f2937); text-align: left; padding: 7px 8px; border-bottom: 1px solid var(--border); cursor: pointer; user-select: none; }

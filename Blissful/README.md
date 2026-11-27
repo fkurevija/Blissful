@@ -104,6 +104,9 @@ curl -s http://localhost:7373/api/health
   See `docs/youtube-login.md` for setup and security notes.
 - 🛡️ **403-Resilient Downloads** - Bundled Deno runtime and PO-token sidecar keep YouTube/YouTube Music working
 - 📥 **Persistent Job Queue** - Downloads tab with history, live logs, automatic retries with backoff, details and cancellation
+- ⚙️ **Concurrent Runs** - Two download workers; a wanted search and a stale cleanup can run at the same time
+- 🎯 **Per-Track Retry** - Failed tracks are listed on the Downloads tab and can be retried individually
+- ⏬ **Jump to Last** - Details-pane button scrolls straight to the newest log entry
 - 🔐 **Optional API Security** - Bearer-token auth and restricted CORS for exposing Blissful beyond a trusted LAN
 
 ---

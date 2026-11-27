@@ -169,13 +169,13 @@ def test_cancel_active_cancels_this_runs_jobs_only(tmp_path):
     manager.update_job(unrelated['id'], status='running')
 
     service = WantedSearchService(ConfigStub(), object, job_manager=manager)
-    service._active = {'kind': 'cleanup', 'run_job_id': parent['id'],
-                       'phase': 'download job running'}
+    service._set_active(kind='cleanup', run_job_id=parent['id'],
+                        phase='download job running')
     assert service.cancel_active() is True
     assert manager.get_job(parent['id'])['status'] == 'cancelled'
     assert manager.get_job(child['id'])['status'] == 'cancelled'
     assert manager.get_job(unrelated['id'])['status'] == 'running'
-    assert service._cancel_event.is_set()
+    assert service._cancel_events['cleanup'].is_set()
 
 
 def test_worker_reschedules_failed_tracks_without_blocking_queue(tmp_path):
@@ -222,7 +222,8 @@ def test_cancelled_run_finishes_cancelled_not_failed(tmp_path):
     job, _ = manager.enqueue('cleanup', {'mode': 'stale-cleanup', 'apply': True})
     manager.update_job(job['id'], status='running')
     service = WantedSearchService(ConfigStub(), object, job_manager=manager)
-    service._cancel_event.set()
+    service._set_active(kind='cleanup', phase='cancelling')
+    service._cancel_for().set()
     changes = {}
     service._finish_job(job['id'], lambda **kw: manager.update_job(job['id'], **kw),
                         success=False, failed=True, reason='boom',

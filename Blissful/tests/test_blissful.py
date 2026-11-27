@@ -1053,17 +1053,92 @@ def test_cleanup_skips_album_already_imported_by_job_history(tmp_path):
     assert any('already imported successfully' in str(s) for s in report['skipped'])
 
 
-def test_wanted_single_flight_blocks_second_run(tmp_path):
+def test_retry_failed_track_endpoint(tmp_path):
+    from flask import Flask
+    from extend.routes import register_routes
+
+    class Config:
+        def get_setting(self, key, default=None):
+            return default
+
+    class Stub:
+        def __init__(self, *a, **k):
+            pass
+
+    manager = JobManager(Config(), None, str(tmp_path / 'jobs.json'))
+    job, _ = manager.enqueue('album', {
+        'artist': 'deadmau5', 'album': 'Get Scraped', 'album_id': 54609,
+        'tracks': [{'title': 'Careless (acoustic)', 'trackId': 1824767,
+                    'target_path': '/media/Music/Deadmau5/Get Scraped/15.mp3'}],
+        'target_path': '/media/Music/Deadmau5',
+    }, dedupe_key='album:old')
+    manager.jobs[0]['status'] = 'failed'
+    manager.jobs[0]['result'] = {'failures': [
+        {'title': 'Careless (acoustic)', 'error': 'bot check'}]}
+    manager._persist()
+
+    app = Flask(__name__)
+    register_routes(app=app, config_manager=Config(), lidarr_client=Stub,
+                    download_manager=Stub(), audio_converter=Stub(),
+                    source_manager=Stub(), auth_manager=Stub(),
+                    request_manager=Stub(), album_manager=Stub(),
+                    track_manager=Stub(), sources_api=Stub(), system_utils=Stub(),
+                    job_manager=manager, wanted_search=None)
+    with app.test_client() as client:
+        response = client.post(f"/api/jobs/{job['id']}/retry-track",
+                               json={'title': 'Careless (acoustic)'})
+    assert response.status_code == 202
+    data = response.get_json()
+    assert data['success'] is True
+    queued = manager.get_job(data['job']['id'])
+    assert len(queued['payload']['tracks']) == 1
+    assert queued['payload']['tracks'][0]['target_path'].endswith('15.mp3')
+    assert queued['payload']['source'] == 'track-retry'
+
+
+def test_job_worker_starts_configurable_pool(tmp_path):
+    class Config:
+        def get_setting(self, key, default=None):
+            return True
+
+    manager = JobManager(Config(), None, str(tmp_path / 'jobs.json'))
+    manager.start_worker(poll_interval=0.1, workers=2)
+    try:
+        assert len(manager._threads) == 2
+        assert all(thread.is_alive() for thread in manager._threads)
+    finally:
+        manager.stop_worker()
+    assert manager._threads == []
+
+
+def test_wanted_single_flight_is_per_run_kind(tmp_path):
     svc = _wanted_service(tmp_path, client=object())
-    assert svc._run_lock.acquire(blocking=False) is True
+    assert svc._run_locks['search'].acquire(blocking=False) is True
     try:
         blocked = svc.search()
         assert blocked['already_running'] is True
         assert 'already running' in blocked['error']
+        # A cleanup uses its own slot and is not blocked by an active search.
+        assert svc._run_locks['cleanup'].acquire(blocking=False) is True
+        svc._run_locks['cleanup'].release()
     finally:
-        svc._run_lock.release()
+        svc._run_locks['search'].release()
     again = _wanted_service(tmp_path, client=object()).search()
     assert not again.get('already_running', False)
+
+
+def test_wanted_service_tracks_two_concurrent_runs(tmp_path):
+    svc = _wanted_service(tmp_path)
+    svc._set_active(kind='search', phase='searching', scanned=2)
+    svc._set_active(kind='cleanup', phase='cleaning', scanned=3)
+    assert set(svc.get_actives()) == {'search', 'cleanup'}
+    assert svc.get_active('search')['phase'] == 'searching'
+    assert svc.get_active('cleanup')['phase'] == 'cleaning'
+    svc._finish_active('completed', kind='search')
+    assert 'cleanup' in svc.get_actives()
+    assert svc.get_active('cleanup')['phase'] == 'cleaning'
+    svc._finish_active('completed', kind='cleanup')
+    assert svc.get_actives() == {}
 
 
 def test_wanted_search_route_returns_409_when_busy():
@@ -1320,9 +1395,9 @@ def test_cancel_active_stops_run_and_job(tmp_path):
     svc = WantedSearchService(Config(), object(),
                               str(tmp_path / 'state.json'), job_manager=jobs)
     svc._set_active(kind='cleanup', phase='searching')
-    svc._run_job_ids.add(jobs.items[0]['id'])
+    svc._run_ids_for('cleanup').add(jobs.items[0]['id'])
     assert svc.cancel_active() is True
-    assert svc._cancel_event.is_set()
+    assert svc._cancel_events['cleanup'].is_set()
     assert jobs.items[0]['status'] == 'cancelled'
     assert svc.get_active()['cancel_requested'] is True
 
