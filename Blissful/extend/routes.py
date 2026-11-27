@@ -82,6 +82,7 @@ def register_routes(app, config_manager, lidarr_client, download_manager,
         if 'emby_api_key' in safe_config and safe_config['emby_api_key']:
             safe_config['emby_api_key'] = '***MASKED***'
         for secret_key in ('auth_token', 'spotify_client_secret', 'discogs_token',
+                           'youtube_cookies',
                            'discogs_consumer_key', 'discogs_consumer_secret',
                            'acoustid_api_key', 'acoustid_user_key'):
             if safe_config.get(secret_key):

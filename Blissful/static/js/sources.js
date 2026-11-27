@@ -108,6 +108,23 @@ function createSourcePriorityItem(source, index) {
             </label>
         </div>
     `;
+
+    if (/youtube/i.test(source.name || '') || /youtube/i.test(source.search || '')) {
+        const fields = document.createElement('div');
+        fields.className = 'source-fields';
+        fields.innerHTML = `
+            <div class="form-group">
+                <label for="youtubeCookies">YouTube cookies.txt (optional)</label>
+                <textarea id="youtubeCookies" rows="6" spellcheck="false"
+                    placeholder="Paste Netscape-format cookies.txt from a signed-in browser"></textarea>
+                <small>Click the source name to show this field. Cookies are stored as a secret and never displayed back. Export with: yt-dlp --cookies-from-browser firefox --cookies cookies.txt</small>
+            </div>
+        `;
+        div.appendChild(fields);
+        div.querySelector('.source-info').addEventListener('click', () => {
+            div.classList.toggle('expanded');
+        });
+    }
     return div;
 }
 

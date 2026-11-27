@@ -140,6 +140,18 @@ async function loadConfiguration() {
         // Load source priorities
         const priorities = config.source_priorities || [];
         loadSourcePriorities(priorities);
+        const youtubeCookies = document.getElementById('youtubeCookies');
+        if (youtubeCookies) {
+            const savedCookies = config.youtube_cookies;
+            if (savedCookies === '***MASKED***') {
+                youtubeCookies.value = '';
+                youtubeCookies.dataset.hasSavedKey = 'true';
+                youtubeCookies.placeholder = 'Cookies configured (leave blank to keep)';
+            } else {
+                youtubeCookies.value = savedCookies || '';
+                youtubeCookies.dataset.hasSavedKey = 'false';
+            }
+        }
         
         // Load request system settings
         document.getElementById('enableRequests').checked = config.enable_requests || false;
@@ -195,6 +207,15 @@ async function saveConfiguration() {
             
             lidarr_path_mapping: getPathMappings(),
             source_priorities: getSourcePriorities(),
+            youtube_cookies: (() => {
+                const field = document.getElementById('youtubeCookies');
+                if (!field) return undefined;
+                const value = field.value.trim();
+                if (!value && field.dataset.hasSavedKey === 'true') {
+                    return '***KEEP_EXISTING***';
+                }
+                return value;
+            })(),
             search_results_per_source: Math.min(10, Math.max(1,
                 parseInt(document.getElementById('searchResultsPerSource').value, 10) || 3)),
             

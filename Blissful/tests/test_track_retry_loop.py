@@ -8,6 +8,7 @@ APP_DIR = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(APP_DIR))
 
 from extend.album_manager import AlbumManager  # noqa: E402
+from extend.download_manager import DownloadManager  # noqa: E402
 from extend.job_manager import JobManager  # noqa: E402
 from extend.wanted_search import WantedSearchService  # noqa: E402
 
@@ -285,3 +286,44 @@ def test_retry_wakes_dispatcher_for_top_level_runs(tmp_path):
     service.cleanup_stale = lambda **kwargs: called.update(kwargs)
     service._process_due_retries()
     assert called['retry_job_id'] == job['id']
+
+
+def test_metadata_no_longer_rewrites_search_query(tmp_path, monkeypatch):
+    manager = DownloadManager(download_dir=str(tmp_path),
+                              config_manager=ConfigStub())
+    def fail(*args, **kwargs):
+        raise AssertionError('metadata refinement must not run before download')
+    monkeypatch.setattr(manager, '_refine_search_query', fail)
+    seen = []
+    monkeypatch.setattr(manager, '_download_from_source',
+                        lambda source, *a, **k: (seen.append(source),
+                                                 {'success': False})[1])
+    manager.download_track('Artist', 'Track', album='Album',
+                           source_priorities=[
+                               {'name': 'SoundCloud', 'search': 'soundcloud.com',
+                                'enabled': True}])
+    assert seen
+    assert 'Artist - Album - Track' in seen[0]
+    assert '2005' not in seen[0]
+
+
+def test_youtube_cookies_are_written_privately(tmp_path):
+    cookies = '# Netscape HTTP Cookie File\n.youtube.com\tTRUE\t/\tTRUE\t0\tSID\tx\n'
+    class CookieConfig:
+        def get_setting(self, key, default=None):
+            return cookies if key == 'youtube_cookies' else default
+
+        def get_config(self):
+            return {'youtube_cookies': cookies, 'output_format': 'mp3',
+                    'quality': '320'}
+
+    manager = DownloadManager(download_dir=str(tmp_path),
+                              config_manager=CookieConfig())
+    opts = manager._build_ydl_opts(str(tmp_path / 'song.%(ext)s'))
+    path = tmp_path / 'youtube_cookies.txt'
+    assert opts.get('cookiefile') == str(path)
+    assert path.read_text(encoding='utf-8') == cookies
+    import os
+    if os.name != 'nt':
+        import stat
+        assert stat.S_IMODE(path.stat().st_mode) == 0o600

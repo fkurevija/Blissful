@@ -103,5 +103,4 @@ def test_download_manager_uses_musicbrainz_query(tmp_path, monkeypatch):
     manager.download_track('M83', 'Lower Your Eyelids', album='Wrong Album',
                            source_priorities=[
                                {'name': 'SoundCloud', 'search': 'soundcloud.com', 'enabled': True}])
-    assert '2005' in tried[0]
-    assert 'Wrong Album' not in tried[0]
+    assert 'M83 - Wrong Album - Lower Your Eyelids' in tried[0]

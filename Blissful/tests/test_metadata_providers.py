@@ -171,7 +171,7 @@ def test_download_manager_uses_discogs_query_and_rejects_bad_acoustid(
         source_priorities=[{'name': 'Bandcamp', 'search': 'bandcamp.com', 'enabled': True},
                            {'name': 'SoundCloud', 'search': 'soundcloud.com', 'enabled': True}])
     assert result['success'] is True
-    assert '2005' in tried[0]
+    assert 'M83 - Before the Dawn Heals Us - Lower Your Eyelids' in tried[0]
     assert not paths['bad'].exists(), 'bad candidate should have been deleted'
     assert result['file_path'] == str(paths['good'])
     assert result['acoustid']['score'] == pytest.approx(0.98)

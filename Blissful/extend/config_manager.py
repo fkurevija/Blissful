@@ -63,6 +63,7 @@ class ConfigManager:
             'PREFER_BLISSFUL_FOR_WANTED': 'prefer_blissful_for_wanted',
             'SPOTIFY_CLIENT_ID': 'spotify_client_id',
             'SPOTIFY_CLIENT_SECRET': 'spotify_client_secret',
+            'YOUTUBE_COOKIES': 'youtube_cookies',
             'DISCOGS_TOKEN': 'discogs_token',
             'DISCOGS_CONSUMER_KEY': 'discogs_consumer_key',
             'DISCOGS_CONSUMER_SECRET': 'discogs_consumer_secret',
@@ -130,6 +131,8 @@ class ConfigManager:
             'spotify_metadata_enabled': False,
             'spotify_client_id': '',
             'spotify_client_secret': '',
+            # Netscape-format cookies.txt content for YouTube (optional).
+            'youtube_cookies': '',
             # Discogs refines the search query; AcoustID verifies downloaded audio.
             'discogs_metadata_enabled': False,
             'discogs_token': '',
@@ -363,9 +366,10 @@ class ConfigManager:
             if key in config:
                 validated[key] = bool(config[key])
         for key in ('spotify_client_id', 'spotify_client_secret', 'auth_token',
+                    'youtube_cookies',
                     'discogs_token', 'discogs_consumer_key',
                     'discogs_consumer_secret', 'acoustid_api_key',
-                    'acoustid_user_key'):
+                    'acoustid_user_key', 'youtube_cookies'):
             if key in config:
                 value = config[key]
                 if value in ('***KEEP_EXISTING***', '***MASKED***'):

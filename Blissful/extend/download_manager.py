@@ -257,6 +257,27 @@ class DownloadManager:
         if config_file:
             ydl_opts['config_paths'] = [os.path.expanduser(str(config_file))]
 
+        # Optional YouTube cookies, stored as a masked config secret. Write
+        # them to a private file and let yt-dlp load that file per request.
+        cookies = self._cfg('youtube_cookies', None)
+        cookie_path = self.download_dir / 'youtube_cookies.txt'
+        if isinstance(cookies, str) and cookies.strip() and not cookies.startswith('***'):
+            try:
+                if getattr(self, '_youtube_cookies_written', None) != cookies:
+                    cookie_path.write_text(cookies, encoding='utf-8')
+                    os.chmod(cookie_path, 0o600)
+                    self._youtube_cookies_written = cookies
+                if cookie_path.is_file():
+                    ydl_opts['cookiefile'] = str(cookie_path)
+            except Exception:
+                logger.debug('Could not prepare YouTube cookies file')
+        else:
+            try:
+                cookie_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+            self._youtube_cookies_written = None
+
         return ydl_opts
 
     # ----------------------------------------------------------- progress
@@ -336,9 +357,10 @@ class DownloadManager:
             Dict with success status, file path, duration, thumbnail path or error
         """
         try:
-            search_query, metadata_source = self._refine_search_query(
-                artist, title, album, expected_duration)
-            logger.info(f"Searching for: {search_query} (metadata: {metadata_source})")
+            # Metadata providers no longer rewrite the pre-download query:
+            # on the live feeds that made searches return zero candidates.
+            search_query = f"{artist} - {album} - {title}" if album else f"{artist} - {title}"
+            logger.info(f"Searching for: {search_query}")
 
             if source_priorities:
                 sources = self._build_source_list(search_query, source_priorities)
