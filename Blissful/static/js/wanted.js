@@ -139,7 +139,7 @@ async function pollWantedProgress(label) {
                     || last.status === 'cancelled';
                 finishWantedToast(
                     wasCancelled ? `${label} cancelled` : `${label} finished`,
-                    wasCancelled ? 'error' : 'success', true);
+                    wasCancelled ? 'info' : 'success', true);
                 break;
             }
             if (active) sawActive = true;
