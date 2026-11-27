@@ -11,12 +11,17 @@ track (including duration-guard rejections and source attempts); hover the Detai
 cell for the full list. Older failed jobs show a note that per-track reasons were
 not recorded. Table header rows use a solid background. Job history is stored in `/app/downloads/jobs.json`, so it survives
 container recreation.
-one search and one cleanup may run at the same time; a second run of the
-same kind is blocked while that kind is active (including runs started by
-the scheduler or another tab). Downloads uses two workers, so their album
+one search and one cleanup may run at the same time; a second request of
+the same kind is queued as a top-level job and starts as soon as that slot
+frees (including runs started by the scheduler or another tab), instead of
+being rejected. Downloads uses two workers, so their album
 jobs can be processed in parallel; the live progress snapshot is shared.
 Failed tracks appear in the Downloads tab's Failed tracks list and can be
 retried one at a time. The details pane has a Jump to last button for long logs.
+When Lidarr already has every track, cleanup removes the stuck queue row
+instead of reporting "no missing tracks" and leaving the torrent there.
+Progress from a child download job is written to the run that owns it,
+so cancelling a search cannot make its progress appear as a cleanup run.
 
 ## Controls
 

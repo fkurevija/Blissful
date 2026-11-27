@@ -467,6 +467,8 @@ def register_routes(app, config_manager, lidarr_client, download_manager,
         )
         if result.get('already_running'):
             return jsonify(result), 409
+        if result.get('queued'):
+            return jsonify(result), 202
         if not result.get('success', True):
             return jsonify(result), 400
         return jsonify(result)
@@ -482,6 +484,8 @@ def register_routes(app, config_manager, lidarr_client, download_manager,
         )
         if result.get('already_running'):
             return jsonify(result), 409
+        if result.get('queued'):
+            return jsonify(result), 202
         return jsonify(result)
 
     @app.route('/api/wanted/cancel', methods=['POST'])

@@ -1053,6 +1053,35 @@ def test_cleanup_skips_album_already_imported_by_job_history(tmp_path):
     assert any('already imported successfully' in str(s) for s in report['skipped'])
 
 
+def test_cleanup_deletes_queue_when_lidarr_has_all_tracks(tmp_path):
+    deleted = []
+    calls = []
+
+    class Client:
+        def get_all_queue_records(self, page_size=200):
+            return [{'id': 11, 'albumId': 10, 'downloadId': 'd1', 'title': 'B',
+                     'errorMessage': 'qBittorrent is downloading metadata'}]
+
+        def get_album_tracks(self, aid):
+            return [{'title': 't1', 'hasFile': True}]
+
+        def delete_queue_item(self, rid, **kwargs):
+            deleted.append(rid)
+            return {'success': True}
+
+    class Gapfill:
+        def gapfill_album(self, aid, apply=True, source='', progress=None, **kwargs):
+            calls.append(aid)
+            return {'status': 'succeeded', 'imported': 1}
+
+    svc = _wanted_service(tmp_path, client=Client(), gapfill=Gapfill())
+    report = svc.cleanup_stale(apply=True, wait_minutes=1)
+    assert calls == []
+    assert deleted == [11]
+    assert report['counts']['deleted'] == 1
+    assert any('already imported in Lidarr' in str(s) for s in report['skipped'])
+
+
 def test_retry_failed_track_endpoint(tmp_path):
     from flask import Flask
     from extend.routes import register_routes
@@ -1111,20 +1140,71 @@ def test_job_worker_starts_configurable_pool(tmp_path):
     assert manager._threads == []
 
 
-def test_wanted_single_flight_is_per_run_kind(tmp_path):
+def test_wanted_single_flight_queues_second_run_of_same_kind(tmp_path):
+    class Config:
+        def get_setting(self, key, default=None):
+            return default
+
+    manager = JobManager(Config(), None, str(tmp_path / 'jobs.json'))
     svc = _wanted_service(tmp_path, client=object())
+    svc.job_manager = manager
     assert svc._run_locks['search'].acquire(blocking=False) is True
     try:
-        blocked = svc.search()
-        assert blocked['already_running'] is True
-        assert 'already running' in blocked['error']
-        # A cleanup uses its own slot and is not blocked by an active search.
+        queued = svc.search(album_ids=[1], apply=True)
+        assert queued['queued'] is True
+        assert queued['already_running'] is False
+        jobs = manager.list_jobs(limit=10)
+        assert len(jobs) == 1
+        assert jobs[0]['kind'] == 'search'
+        assert jobs[0]['payload']['album_ids'] == [1]
+        # A cleanup uses its own slot and is never blocked by a search.
         assert svc._run_locks['cleanup'].acquire(blocking=False) is True
         svc._run_locks['cleanup'].release()
     finally:
         svc._run_locks['search'].release()
     again = _wanted_service(tmp_path, client=object()).search()
-    assert not again.get('already_running', False)
+    assert not again.get('queued', False)
+
+
+def test_queued_run_dispatches_when_slot_frees(tmp_path, monkeypatch):
+    class Config:
+        def get_setting(self, key, default=None):
+            return default
+
+    manager = JobManager(Config(), None, str(tmp_path / 'jobs.json'))
+    svc = _wanted_service(tmp_path, client=object())
+    svc.job_manager = manager
+    assert svc._run_locks['cleanup'].acquire(blocking=False) is True
+    queued = svc.cleanup_stale(record_ids=[11], apply=True)
+    assert queued['queued'] is True
+    svc._process_due_retries()
+    assert manager.get_job(queued['job']['id'])['status'] == 'pending'
+    calls = []
+    monkeypatch.setattr(
+        svc, 'cleanup_stale',
+        lambda **kwargs: calls.append(kwargs) or {'success': True})
+    svc._run_locks['cleanup'].release()
+    svc._process_due_retries()
+    assert calls and calls[0].get('record_ids') == [11]
+
+
+def test_search_progress_does_not_pollute_cleanup_run(tmp_path):
+    class Gapfill:
+        def gapfill_album(self, aid, apply=True, source='', progress=None, **kwargs):
+            progress('download job running', current_track=1, total_tracks=2)
+            return {'status': 'succeeded', 'imported': 2}
+
+    svc = _wanted_service(tmp_path, gapfill=Gapfill())
+    svc._set_active(kind='search', run_job_id='x', phase='starting')
+    svc._gapfill_album(10, apply=True, source='wanted-search-fallback')
+    assert svc.get_active('cleanup') is None
+    assert svc.get_active('search')['phase'] == 'download job running'
+
+    progress, _state = svc._aggregate_progress_callback(
+        svc, None, 1, 1, 2, 'Artist', 'Album', kind='search')
+    progress('track', download_index=1)
+    assert svc.get_active('cleanup') is None
+    assert svc.get_active('search')['current_track'] == 1
 
 
 def test_wanted_service_tracks_two_concurrent_runs(tmp_path):
@@ -1139,6 +1219,35 @@ def test_wanted_service_tracks_two_concurrent_runs(tmp_path):
     assert svc.get_active('cleanup')['phase'] == 'cleaning'
     svc._finish_active('completed', kind='cleanup')
     assert svc.get_actives() == {}
+
+
+def test_wanted_route_returns_202_when_run_queued():
+    from flask import Flask
+    from extend.routes import register_routes
+
+    class Stub:
+        def __init__(self, *a, **k):
+            pass
+
+    class Config:
+        def get_config(self):
+            return {'wanted_search_enabled': True}
+
+    class QueuedWanted:
+        def search(self, **kwargs):
+            return {'success': True, 'queued': True, 'job': {'id': 'j1'}}
+
+    app = Flask(__name__)
+    register_routes(app=app, config_manager=Config(), lidarr_client=Stub,
+                    download_manager=Stub(), audio_converter=Stub(),
+                    source_manager=Stub(), auth_manager=Stub(),
+                    request_manager=Stub(), album_manager=Stub(),
+                    track_manager=Stub(), sources_api=Stub(), system_utils=Stub(),
+                    job_manager=None, wanted_search=QueuedWanted())
+    with app.test_client() as client:
+        response = client.post('/api/wanted/search', json={'apply': True})
+    assert response.status_code == 202
+    assert response.get_json()['queued'] is True
 
 
 def test_wanted_search_route_returns_409_when_busy():
@@ -1308,14 +1417,17 @@ def test_stale_item_with_no_missing_tracks_is_skipped_with_reason(tmp_path, monk
         def post_command(self, *a, **k):
             raise AssertionError('nothing should be searched')
 
-        def delete_queue_item(self, *a, **k):
-            raise AssertionError('nothing should be deleted')
+        def delete_queue_item(self, rid, **kwargs):
+            deleted.append(rid)
+            return {'success': True}
 
+    deleted = []
     svc = _wanted_service(tmp_path, client=Client(), gapfill=object())
     report = svc.cleanup_stale(apply=True)
     assert report['counts']['kept'] == 0
-    assert report['counts']['deleted'] == 0
-    assert report['skipped'][0]['reason'] == 'no missing tracks in Lidarr'
+    assert deleted == [11]
+    assert report['counts']['deleted'] == 1
+    assert 'already imported in Lidarr' in report['skipped'][0]['reason']
 
 
 def test_wanted_search_creates_downloads_job(tmp_path):

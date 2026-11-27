@@ -250,8 +250,16 @@ class WantedSearchService:
         if callable(engine):
 
             def progress(phase, **details):
-
-                self._set_active(phase=phase, album=album_id, **details)
+                # Child jobs run on worker threads, so the thread-local kind
+                # is unreliable; route progress by the run that owns the job.
+                run_kind = ('cleanup' if source == 'stale-cleanup'
+                            else 'search' if 'wanted' in str(source or '')
+                            else None)
+                if run_kind:
+                    self._set_active(kind=run_kind, phase=phase, album=album_id,
+                                     **details)
+                else:
+                    self._set_active(phase=phase, album=album_id, **details)
 
                 if progress_hook:
 
@@ -362,7 +370,10 @@ class WantedSearchService:
         kind = 'search'
         self._local.kind = kind
         if not self._run_locks[kind].acquire(blocking=False):
-            return self._busy_report()
+            job = self.queue_requested_run(
+                kind, album_ids=album_ids, apply=bool(apply))
+            return {'success': True, 'queued': True, 'already_running': False,
+                    'job': job, 'active': self.get_active(kind)}
 
         self._cancel_events[kind].clear()
         self._run_job_ids_by_kind[kind].clear()
@@ -388,7 +399,11 @@ class WantedSearchService:
         kind = 'cleanup'
         self._local.kind = kind
         if not self._run_locks[kind].acquire(blocking=False):
-            return self._busy_report()
+            job = self.queue_requested_run(
+                kind, record_ids=record_ids, apply=bool(apply),
+                wait_minutes=wait_minutes)
+            return {'success': True, 'queued': True, 'already_running': False,
+                    'job': job, 'active': self.get_active(kind)}
 
         self._cancel_events[kind].clear()
         self._run_job_ids_by_kind[kind].clear()
@@ -406,6 +421,23 @@ class WantedSearchService:
                 self._retry_wake.set()
             self._run_locks[kind].release()
             self._local.kind = None
+
+    def queue_requested_run(self, kind, **params):
+        """Persist a requested run so the dispatcher starts it when its slot frees."""
+        if self.job_manager is None:
+            return None
+        payload = dict(params)
+        payload['source'] = 'wanted-ui'
+        try:
+            job, _duplicate = self.job_manager.enqueue(
+                kind, payload,
+                dedupe_key=f"{kind}-queued-{time.time()}")
+            if job:
+                self._retry_wake.set()
+            return job
+        except Exception as exc:
+            logger.warning('Could not queue %s run: %s', kind, exc)
+            return None
 
     # ------------------------------------------------------------- progress
 
@@ -1396,6 +1428,8 @@ class WantedSearchService:
 
                         grand_total_tracks or 1, artist, album_title,
 
+                        kind='search',
+
                     )
 
                 try:
@@ -1600,7 +1634,8 @@ class WantedSearchService:
 
     def _aggregate_progress_callback(service, job_progress, index, total_albums,
 
-                                     total_tracks, artist, album_title):
+                                     total_tracks, artist, album_title,
+                                     kind='cleanup'):
 
         state = {'done_before': 0}
 
@@ -1636,7 +1671,7 @@ class WantedSearchService:
 
             payload.update(details)
 
-            service._set_active(kind='cleanup', **payload)
+            service._set_active(kind=kind, **payload)
 
             if callable(job_progress):
                 job_progress(progress=payload)
@@ -1891,19 +1926,17 @@ class WantedSearchService:
                 baseline, baseline_missing = baseline_cache[album_id]
 
                 if baseline_missing == 0:
-
+                    # Lidarr already has every track: the torrent is only
+                    # stuck in its queue. Remove it without re-downloading.
                     report['skipped'].append({
-
                         'album': album_id, 'title': title,
-
-                        'reason': 'no missing tracks in Lidarr',
-
+                        'reason': 'already imported in Lidarr - no missing tracks',
                         'ids': [record.get('id') for record in records],
-
                     })
-
+                    if apply:
+                        self._remove_stale_queue_records(
+                            client, records, report, albums_state, album_id, title)
                     continue
-
 
 
                 if progress_hook is None:
@@ -1913,6 +1946,8 @@ class WantedSearchService:
                         self, job_progress, index, total_albums,
 
                         grand_total_tracks or 1, '', title,
+
+                        kind='cleanup',
 
                     )
 
