@@ -60,6 +60,7 @@ class ConfigManager:
             'GAPFILL_JOB_TIMEOUT_MINUTES': 'gapfill_job_timeout_minutes',
             'STALE_CLEANUP_REMOVE_FROM_CLIENT': 'stale_cleanup_remove_from_client',
             'WANTED_SEARCH_TIMEOUT_MINUTES': 'wanted_search_timeout_minutes',
+            'LIDARR_COMMAND_TIMEOUT_MINUTES': 'lidarr_command_timeout_minutes',
             'PREFER_BLISSFUL_FOR_WANTED': 'prefer_blissful_for_wanted',
             'SPOTIFY_CLIENT_ID': 'spotify_client_id',
             'SPOTIFY_CLIENT_SECRET': 'spotify_client_secret',
@@ -82,7 +83,7 @@ class ConfigManager:
                      'musicbrainz_metadata_enabled',
                      'wanted_search_enabled', 'stale_cleanup_enabled',
                      'prefer_blissful_for_stale'}
-        int_keys = {'search_results_per_source'}
+        int_keys = {'search_results_per_source', 'lidarr_command_timeout_minutes'}
         for env_key, config_key in env_map.items():
             value = os.environ.get(env_key)
             if value is None or value == '':
@@ -175,6 +176,7 @@ class ConfigManager:
             'gapfill_job_timeout_minutes': 15,
             'stale_cleanup_remove_from_client': True,
             'wanted_search_timeout_minutes': 10,
+            'lidarr_command_timeout_minutes': 30,
             'prefer_blissful_for_wanted': True,
             # Request system defaults
             'enable_requests': False,
@@ -425,7 +427,8 @@ class ConfigManager:
         for key, minimum in (('stale_cleanup_interval_hours', 1),
                              ('stale_cleanup_wait_minutes', 1),
                              ('gapfill_job_timeout_minutes', 1),
-                             ('wanted_search_timeout_minutes', 1)):
+                             ('wanted_search_timeout_minutes', 1),
+                             ('lidarr_command_timeout_minutes', 1)):
             if key in config:
                 try:
                     value = int(config[key])

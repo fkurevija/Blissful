@@ -438,7 +438,8 @@ export LIDARR_API_KEY=your-key
 | `PREFER_BLISSFUL_FOR_STALE` | `true` | Use Blissful's gap-fill instead of Lidarr `AlbumSearch` for stale items |
 | `GAPFILL_JOB_TIMEOUT_MINUTES` | `15` | How long to wait for a multi-track gap-fill job before moving on |
 | `STALE_CLEANUP_REMOVE_FROM_CLIENT` | `true` | Let Lidarr remove the torrent and its data from qBittorrent when deleting a stale queue item |
-| `WANTED_SEARCH_TIMEOUT_MINUTES` | `10` | How long to wait for a Lidarr search command to finish |
+| `LIDARR_COMMAND_TIMEOUT_MINUTES` | `30` | How long to wait for a Lidarr search command to finish before falling back to Blissful |
+| `WANTED_SEARCH_TIMEOUT_MINUTES` | `10` | Legacy setting retained for compatibility; the command poll uses `LIDARR_COMMAND_TIMEOUT_MINUTES` |
 | `PREFER_BLISSFUL_FOR_WANTED` | `true` | After Lidarr search, gap-fill still-missing albums via Blissful |
 
 #### **YouTube / YouTube Music 403 configuration**

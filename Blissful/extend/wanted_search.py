@@ -1250,11 +1250,11 @@ class WantedSearchService:
 
         try:
 
-            minutes = int(self._config().get('wanted_search_timeout_minutes', 10) or 10)
+            minutes = int(self._config().get('lidarr_command_timeout_minutes', 30) or 30)
 
         except (TypeError, ValueError):
 
-            minutes = 10
+            minutes = 30
 
         command = self._poll_command(client, command_id, progress=progress,
 

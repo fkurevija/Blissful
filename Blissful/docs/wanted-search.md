@@ -89,7 +89,9 @@ With *Apply* checked, for each selected stale item Blissful:
 
 1. Reads the album's tracks and skips it if nothing is missing; Lidarr's queue
    and track files are the only source of truth.
-2. Queues `AlbumSearch` for that album and waits for the Lidarr command.
+2. Queues `AlbumSearch` for that album and waits up to
+   `lidarr_command_timeout_minutes` (default 30) for Lidarr to finish before
+   treating the command as timed out and handing missing tracks to Blissful.
 3. Polls the album's tracks until every track has `hasFile: true`, bounded by the
    configured wait.
 4. Only then deletes the original queue entry with `deleteFiles=false` and

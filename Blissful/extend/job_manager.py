@@ -451,6 +451,30 @@ class JobManager:
                 return dict(job)
         return None
 
+    def _with_download_snapshot(self, job_id, details):
+        """Attach the job's current source/attempts to a progress snapshot."""
+        merged = dict(details or {})
+        downloader = getattr(getattr(self, 'album_manager', None),
+                             'download_manager', None)
+        if downloader is None or not hasattr(downloader, 'get_download_progress'):
+            return merged
+        try:
+            snap = downloader.get_download_progress(job_id) or {}
+        except Exception:
+            return merged
+        mapping = {
+            'source': 'download_source',
+            'status': 'download_status',
+            'attempts': 'download_attempts',
+            'pending': 'download_pending',
+            'candidate_index': 'download_candidate_current',
+            'candidate_total': 'download_candidate_total',
+        }
+        for key, name in mapping.items():
+            if key in snap:
+                merged[name] = snap[key]
+        return merged
+
     def _process(self, job):
         payload = job.get('payload', {})
         logger.info("Processing job %s for %s - %s", job['id'], payload.get('artist'), payload.get('album'))
@@ -469,7 +493,7 @@ class JobManager:
                         (self.get_job(job['id']) or {}).get('status') == 'cancelled'),
                     retry_delay=self.retry_delay,
                     on_progress=lambda **details:
-                        self.update_job(job['id'], progress=details),
+                        self.update_job(job['id'], progress=self._with_download_snapshot(job['id'], details)),
                 )
             else:
                 result = {'success': False, 'error': f"Unknown job type: {job.get('kind')}"}

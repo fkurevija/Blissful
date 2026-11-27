@@ -625,6 +625,7 @@ def test_config_has_wanted_search_defaults(tmp_path):
     assert cfg['gapfill_job_timeout_minutes'] == 15
     assert cfg['stale_cleanup_remove_from_client'] is True
     assert cfg['wanted_search_timeout_minutes'] == 10
+    assert cfg['lidarr_command_timeout_minutes'] == 30
     assert cfg['prefer_blissful_for_wanted'] is True
 
 
@@ -1097,6 +1098,30 @@ def test_download_progress_is_isolated_per_job(tmp_path):
     assert manager.get_download_progress('job-a')['attempts']
     manager.reset_download_progress('job-a')
     assert manager.get_download_progress('job-a') == {}
+
+
+def test_job_progress_merges_per_job_download_snapshot(tmp_path):
+    class Config:
+        def get_setting(self, key, default=None):
+            return default
+
+    class Download:
+        def get_download_progress(self, key=None):
+            assert key == 'job-1'
+            return {'source': 'ytsearch1:A - B',
+                    'status': 'trying',
+                    'attempts': [{'source': 'scsearch1:A - B', 'status': 'failed'}]}
+
+    class Album:
+        download_manager = Download()
+
+    manager = JobManager(Config(), Album(), str(tmp_path / 'jobs.json'))
+    merged = manager._with_download_snapshot(
+        'job-1', {'phase': 'track', 'current_track': 1})
+    assert merged['download_source'] == 'ytsearch1:A - B'
+    assert merged['download_status'] == 'trying'
+    assert merged['download_attempts'][0]['status'] == 'failed'
+    assert merged['current_track'] == 1
 
 
 def test_job_log_keeps_source_and_attempt_snapshot(tmp_path):
