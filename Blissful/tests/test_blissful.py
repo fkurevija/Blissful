@@ -1024,6 +1024,9 @@ def test_cleanup_skips_album_already_imported_by_job_history(tmp_path):
     manager.jobs[0]['finished_at'] = datetime.now(timezone.utc).isoformat()
     manager._persist()
 
+    calls = []
+    deleted = []
+
     class Client:
         def get_all_queue_records(self, page_size=200):
             return [{'id': 11, 'albumId': 10, 'downloadId': 'd1', 'title': 'B',
@@ -1032,7 +1035,9 @@ def test_cleanup_skips_album_already_imported_by_job_history(tmp_path):
         def get_album_tracks(self, aid):
             return [{'title': 't1', 'hasFile': False}]
 
-    calls = []
+        def delete_queue_item(self, rid, **kwargs):
+            deleted.append(rid)
+            return {'success': True}
 
     class Gapfill:
         def gapfill_album(self, aid, apply=True, source='', progress=None, **kwargs):
@@ -1043,6 +1048,8 @@ def test_cleanup_skips_album_already_imported_by_job_history(tmp_path):
     svc.job_manager = manager
     report = svc.cleanup_stale(apply=True, wait_minutes=1)
     assert calls == []
+    assert deleted == [11]
+    assert report['counts']['deleted'] == 1
     assert any('already imported successfully' in str(s) for s in report['skipped'])
 
 

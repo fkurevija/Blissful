@@ -41,8 +41,9 @@ then that result is processed, so a depth of 10 no longer fetches 10 videos.
 Cleanup records an album as imported as soon as gap-fill succeeds, before the
 Lidarr queue entry is deleted. A later run also skips any album with a
 successful album job in the last 24 hours, so a slow Lidarr library scan cannot
-cause the same album to be downloaded twice. Queue entries are still deleted
-only after import is confirmed.
+cause the same album to be downloaded twice. The stale queue row is still
+removed in that case — skipping the re-download does not skip Lidarr cleanup.
+Queue entries are deleted only after import is confirmed.
 
 ## Wanted / missing albums
 

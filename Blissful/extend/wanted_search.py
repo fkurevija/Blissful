@@ -313,6 +313,35 @@ class WantedSearchService:
                 return True
         return False
 
+    def _remove_stale_queue_records(self, client, records, report,
+                                    albums_state, album_id, title):
+        """Delete stale Lidarr queue rows after import is confirmed."""
+        self._set_active(phase='removing stale queue entry',
+                         imported=len(report['imported']))
+        for record in records:
+            record_id = record.get('id')
+            try:
+                client.delete_queue_item(
+                    record_id,
+                    remove_from_client=bool(self._config().get(
+                        'stale_cleanup_remove_from_client', True)),
+                    blocklist=False, skip_redownload=True)
+            except Exception as exc:
+                report['errors'].append(self._safe_error(exc))
+                report['kept'].append(record_id)
+                continue
+            report['deleted'].append(record_id)
+            albums_state[str(record_id)] = {
+                'timestamp': time.strftime('%Y-%m-%dT%H:%M:%S'),
+                'album': album_id,
+                'title': title,
+                'status': 'deleted',
+            }
+        self._set_active(deleted=len(report['deleted']),
+                         kept=len(report['kept']),
+                         errors=len(report['errors']),
+                         skipped=len(report['skipped']))
+
     # --------------------------------------------------------- single flight
 
     def _busy_report(self):
@@ -1892,7 +1921,18 @@ class WantedSearchService:
 
                                               'title': title,
 
-                                              'reason': 'already imported successfully'})
+                                              'reason': 'already imported successfully - skipping re-download'})
+
+                    report['imported'].append({'album': album_id, 'title': title,
+
+                                              'baseline_missing': 0,
+
+                                              'engine': 'blissful',
+
+                                              'already_imported': True})
+
+                    self._remove_stale_queue_records(
+                        client, records, report, albums_state, album_id, title)
 
                     continue
 
@@ -2122,55 +2162,8 @@ class WantedSearchService:
 
                 progress_state['done_before'] += gap.get('imported') or 0
 
-                self._set_active(phase='removing stale queue entry',
-
-                                 imported=len(report['imported']))
-
-                for record in records:
-
-                    record_id = record.get('id')
-
-                    try:
-
-                        client.delete_queue_item(
-
-                            record_id,
-
-                            remove_from_client=bool(self._config().get(
-
-                                'stale_cleanup_remove_from_client', True)),
-
-                            blocklist=False, skip_redownload=True)
-
-                    except Exception as exc:
-
-                        report['errors'].append(self._safe_error(exc))
-
-                        report['kept'].append(record_id)
-
-                        continue
-
-                    report['deleted'].append(record_id)
-
-                    albums_state[str(record_id)] = {
-
-                        'timestamp': time.strftime('%Y-%m-%dT%H:%M:%S'),
-
-                        'album': album_id,
-
-                        'title': title,
-
-                        'status': 'deleted',
-
-                    }
-
-                self._set_active(deleted=len(report['deleted']),
-
-                                 kept=len(report['kept']),
-
-                                 errors=len(report['errors']),
-
-                                 skipped=len(report['skipped']))
+                self._remove_stale_queue_records(
+                    client, records, report, albums_state, album_id, title)
 
             except Exception as exc:
 
