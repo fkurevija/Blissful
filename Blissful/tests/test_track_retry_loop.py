@@ -115,3 +115,38 @@ def test_album_loop_stops_when_cancelled():
     assert result['cancelled'] is True
     assert result['success'] is False
     assert result['completed_tracks'] == 1
+
+
+def test_album_loop_reports_progress_callback():
+    manager, downloads = make_album_manager(['A'])
+    seen = []
+    manager.download_album(
+        'Artist', 'Album', [{'title': 'A'}, {'title': 'B'}],
+        should_cancel=lambda: False, retry_delay=lambda round_no: 0,
+        on_progress=lambda **details: seen.append(details))
+    assert any(d.get('completed_tracks') == 1 and d.get('total_tracks') == 2
+               for d in seen)
+    assert seen[-1]['completed_tracks'] == 2
+    assert seen[-1]['round'] == 2
+
+
+def test_job_manager_passes_live_progress_callback(tmp_path):
+    class CaptureAlbum:
+        def __init__(self):
+            self.kwargs = {}
+
+        def download_album(self, **kwargs):
+            self.kwargs = kwargs
+            return {'success': True, 'completed_tracks': 1, 'total_tracks': 1,
+                    'successful': 1, 'failed': 0, 'rounds': 1, 'tracks': []}
+
+    album = CaptureAlbum()
+    manager = JobManager(ConfigStub(), album,
+                         storage_path=str(tmp_path / 'jobs.json'))
+    job, _ = manager.enqueue('album', {'artist': 'A', 'album': 'B'})
+    manager._process(manager._next_pending())
+    assert callable(album.kwargs.get('on_progress'))
+    album.kwargs['on_progress'](phase='track', completed_tracks=1, total_tracks=1)
+    stored = manager.get_job(job['id'])
+    assert stored['status'] == 'succeeded'
+    assert stored['progress']['completed_tracks'] == 1

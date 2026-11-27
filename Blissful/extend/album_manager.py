@@ -172,7 +172,7 @@ class AlbumManager:
             }
     
     def download_album(self, artist, album, tracks, target_path='',
-                       should_cancel=None, retry_delay=None):
+                       should_cancel=None, retry_delay=None, on_progress=None):
         """Download every track, retrying only the failures in later rounds.
 
         A failed track never blocks the rest of the album: it is left pending
@@ -219,7 +219,17 @@ class AlbumManager:
                         return
                     time.sleep(min(1.0, max(0.0, deadline - time.monotonic())))
 
-            def progress(round_no):
+            def progress(round_no, phase='track'):
+                details = {
+                    'phase': phase,
+                    'artist': artist,
+                    'album': album,
+                    'current_track': results['completed_tracks'],
+                    'total_tracks': total,
+                    'completed_tracks': results['completed_tracks'],
+                    'failed_tracks': len(pending),
+                    'round': round_no,
+                }
                 try:
                     self.download_manager._set_download_progress(
                         download_index=results['completed_tracks'],
@@ -230,6 +240,11 @@ class AlbumManager:
                     )
                 except Exception:
                     pass
+                if callable(on_progress):
+                    try:
+                        on_progress(**details)
+                    except Exception:
+                        logger.debug('Album progress callback failed')
 
             while pending:
                 if cancelled():
@@ -314,7 +329,8 @@ class AlbumManager:
 
                 pending = next_pending
                 results['failed'] = len(pending)
-                progress(results['rounds'])
+                progress(results['rounds'],
+                         'retry-round' if pending else 'complete')
                 if not managed and pending:
                     break
                 if pending and not cancelled():

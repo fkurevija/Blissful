@@ -428,6 +428,8 @@ class JobManager:
                     should_cancel=lambda: (
                         (self.get_job(job['id']) or {}).get('status') == 'cancelled'),
                     retry_delay=self.retry_delay,
+                    on_progress=lambda **details:
+                        self.update_job(job['id'], progress=details),
                 )
             else:
                 result = {'success': False, 'error': f"Unknown job type: {job.get('kind')}"}
