@@ -140,7 +140,7 @@ function renderJobs(jobs) {
             }, 2);
         }
 
-        if (job.status === 'failed') {
+        if (job.status === 'failed' || job.status === 'cancelled') {
             makeAction('Retry', '', async () => {
                 try {
                     const res = await fetch(`/api/jobs/${job.id}/retry`, { method: 'POST' });
