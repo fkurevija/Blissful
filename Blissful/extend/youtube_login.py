@@ -85,9 +85,15 @@ class YouTubeLoginService:
     def novnc_url(self, request_host=None):
         explicit = os.environ.get('YOUTUBE_NOVNC_URL')
         if explicit:
-            return explicit
-        host = (request_host or '').split(':')[0] or 'localhost'
-        return f'http://{host}:{self.novnc_port}/'
+            base_url = explicit
+        else:
+            host = (request_host or '').split(':')[0] or 'localhost'
+            base_url = f'http://{host}:{self.novnc_port}/'
+        # The stock noVNC page shows a Connect dialog with a password field
+        # unless autoconnect is set. Skip it so the embedded window goes
+        # straight to the browser running on the server.
+        separator = '&' if '?' in base_url else '?'
+        return f'{base_url}{separator}autoconnect=1'
 
     def _close(self):
         global _DRIVER

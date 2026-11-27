@@ -36,7 +36,9 @@ docker compose up -d blissful
 
 Port 7900 must be reachable from the browser you use to open Blissful. If
 Blissful is behind a reverse proxy with a different hostname, set
-`YOUTUBE_NOVNC_URL` on the `blissful` service to the full noVNC URL.
+`YOUTUBE_NOVNC_URL` on the `blissful` service to the full noVNC URL. Blissful
+appends `?autoconnect=1` so the embedded window connects immediately instead of
+showing noVNC's generic Connect dialog with a password field.
 
 ## Sign in from the UI
 
@@ -104,6 +106,11 @@ Used by the UI; handy for debugging:
   the command above and restart Blissful.
 - **Login window shows a blank screen** — confirm noVNC responds:
   `curl -I http://<server>:7900/`.
+- **noVNC asks for a password** — the sidecar was started with VNC auth
+  enabled instead of `SE_VNC_NO_PASSWORD=true`. Set that variable on the
+  `youtube-login` service and recreate it with `docker compose --profile
+  youtube-login up -d --force-recreate youtube-login`. A password field
+  *inside* the browser is for your Google/YouTube account instead.
 - **"No YouTube cookies found"** — you must complete the YouTube sign-in in
   the window before clicking Save cookies.
 - **Session creation error / `DevToolsActivePort`** — make sure no stale
