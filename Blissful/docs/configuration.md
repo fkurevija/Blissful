@@ -296,6 +296,9 @@ The sidecar image is roughly 400–600 MB on disk and uses 300–800 MB RAM whil
 running. It is not started by default. You can still paste a Netscape
 `cookies.txt` into the expanded row manually, or set `YOUTUBE_COOKIES`.
 
+See `docs/youtube-login.md` for the full walkthrough, security notes and
+troubleshooting.
+
 Use a dedicated Google account. The exported cookies include YouTube session
 cookies and should be treated as secrets.
 
