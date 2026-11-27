@@ -287,7 +287,18 @@ class JobManager:
                 try:
                     job = self._next_pending()
                     if job:
-                        self._process(job)
+                        downloader = getattr(
+                            self.album_manager, 'download_manager', None)
+                        context = (downloader if downloader is not None
+                                   and hasattr(downloader, 'set_progress_context')
+                                   else None)
+                        if context:
+                            context.set_progress_context(job['id'])
+                        try:
+                            self._process(job)
+                        finally:
+                            if context:
+                                context.clear_progress_context()
                     else:
                         self._stop.wait(poll_interval)
                 except Exception as exc:

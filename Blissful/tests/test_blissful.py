@@ -1083,6 +1083,40 @@ def test_cleanup_deletes_queue_when_lidarr_has_all_tracks(tmp_path):
     assert any('already imported in Lidarr' in str(s) for s in report['skipped'])
 
 
+def test_download_progress_is_isolated_per_job(tmp_path):
+    manager = DownloadManager(str(tmp_path))
+    manager.set_progress_context('job-a')
+    manager._set_download_progress(source='ytsearch1:A',
+                                   attempts=[{'source': 'scsearch1:A'}])
+    manager.set_progress_context('job-b')
+    manager._set_download_progress(source='ytsearch1:B', attempts=[])
+    assert manager.get_download_progress('job-a')['source'] == 'ytsearch1:A'
+    assert manager.get_download_progress('job-a')['attempts']
+    assert manager.get_download_progress('job-b')['attempts'] == []
+    manager._set_download_progress(source='ytsearch1:B2', attempts=[])
+    assert manager.get_download_progress('job-a')['attempts']
+    manager.reset_download_progress('job-a')
+    assert manager.get_download_progress('job-a') == {}
+
+
+def test_job_log_keeps_source_and_attempt_snapshot(tmp_path):
+    class Config:
+        def get_setting(self, key, default=None):
+            return default
+
+    manager = JobManager(Config(), None, str(tmp_path / 'jobs.json'))
+    job, _ = manager.enqueue('album', {'artist': 'A', 'album': 'B'})
+    manager.update_job(job['id'], progress={
+        'phase': 'download job running',
+        'download_source': 'ytsearch1:A - B',
+        'download_status': 'trying',
+        'download_attempts': [{'source': 'scsearch1:A - B', 'status': 'failed'}],
+    })
+    entry = manager.get_job(job['id'])['log'][-1]
+    assert entry['download_source'] == 'ytsearch1:A - B'
+    assert entry['download_attempts'][0]['source'] == 'scsearch1:A - B'
+
+
 def test_retry_failed_track_endpoint(tmp_path):
     from flask import Flask
     from extend.routes import register_routes

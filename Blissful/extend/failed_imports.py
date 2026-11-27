@@ -476,6 +476,7 @@ class FailedImportsRetry:
         ManualImport. Returns a per-album report entry and never raises.
         """
         entry = self._album_report(aid)
+        job_id = None
         client = self._get_client()
 
         extra = {'album_id': aid}
@@ -489,7 +490,7 @@ class FailedImportsRetry:
                 downloader = getattr(self, 'download_manager', None)
                 if downloader is not None and hasattr(downloader,
                                                       'get_download_progress'):
-                    snap = downloader.get_download_progress() or {}
+                    snap = downloader.get_download_progress(job_id) or {}
                     mapping = {
                         'title': 'download_track',
                         'artist': 'download_artist',

@@ -15,7 +15,8 @@ one search and one cleanup may run at the same time; a second request of
 the same kind is queued as a top-level job and starts as soon as that slot
 frees (including runs started by the scheduler or another tab), instead of
 being rejected. Downloads uses two workers, so their album
-jobs can be processed in parallel; the live progress snapshot is shared.
+jobs can be processed in parallel; each job has its own progress snapshot,
+so one run cannot erase another run's current source or download attempts.
 Failed tracks appear in the Downloads tab's Failed tracks list and can be
 retried one at a time. The details pane has a Jump to last button for long logs.
 When Lidarr already has every track, cleanup removes the stuck queue row

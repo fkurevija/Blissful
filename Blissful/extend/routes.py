@@ -504,7 +504,9 @@ def register_routes(app, config_manager, lidarr_client, download_manager,
         # merge it on read so a long search visibly advances in the UI.
         if active and download_manager is not None:
             try:
-                snap = download_manager.get_download_progress() or {}
+                getter = getattr(download_manager, 'get_latest_download_progress',
+                                 download_manager.get_download_progress)
+                snap = getter() or {}
                 mapping = {
                     'status': 'download_status',
                     'source': 'download_source',

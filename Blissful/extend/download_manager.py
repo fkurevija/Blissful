@@ -5,6 +5,7 @@ import threading
 import logging
 import re
 import shutil
+import time
 from pathlib import Path
 from typing import Dict, Optional, Any
 import subprocess
@@ -59,8 +60,10 @@ except (ImportError, ValueError):  # pragma: no cover - standalone import
 
 # Live download progress for the Wanted tab. One worker processes jobs, so a
 # single snapshot is enough; reads from the web thread are guarded.
+# Keyed by job id: concurrent workers must not reset each other's attempts.
 DOWNLOAD_PROGRESS = {}
 _DOWNLOAD_PROGRESS_LOCK = threading.Lock()
+PROGRESS_CONTEXT = threading.local()
 
 _DEFAULT_POT_URL = 'http://blissful-pot:4416'
 _DEFAULT_DENO_PATH = '/usr/local/bin/deno'
@@ -325,27 +328,53 @@ class DownloadManager:
         return ydl_opts
 
     # ----------------------------------------------------------- progress
-    def get_download_progress(self):
-        """Snapshot of the current download attempt (safe cross-thread read)."""
+    @staticmethod
+    def _progress_key(key=None):
+        return key or getattr(PROGRESS_CONTEXT, 'key', None) or 'default'
+
+    def set_progress_context(self, key):
+        PROGRESS_CONTEXT.key = str(key) if key else 'default'
+
+    def clear_progress_context(self):
+        PROGRESS_CONTEXT.key = 'default'
+
+    def get_download_progress(self, key=None):
+        """Snapshot of one job's download attempt (safe cross-thread read)."""
         with _DOWNLOAD_PROGRESS_LOCK:
-            return dict(DOWNLOAD_PROGRESS)
+            return dict(DOWNLOAD_PROGRESS.get(self._progress_key(key), {}))
+
+    def get_latest_download_progress(self):
+        """Most recently updated snapshot, for the live status endpoint."""
+        with _DOWNLOAD_PROGRESS_LOCK:
+            latest = None
+            for snapshot in DOWNLOAD_PROGRESS.values():
+                if snapshot and (latest is None or
+                                 snapshot.get('updated_at', 0) >= latest.get('updated_at', 0)):
+                    latest = snapshot
+            return dict(latest or {})
 
     def _set_download_progress(self, **updates):
+        key = self._progress_key()
         with _DOWNLOAD_PROGRESS_LOCK:
-            DOWNLOAD_PROGRESS.update(updates)
-            return dict(DOWNLOAD_PROGRESS)
+            snapshot = DOWNLOAD_PROGRESS.setdefault(key, {})
+            snapshot.update(updates)
+            snapshot['updated_at'] = time.time()
+            return dict(snapshot)
 
     def _add_source_attempt(self, source, status, reason=''):
+        key = self._progress_key()
         with _DOWNLOAD_PROGRESS_LOCK:
-            attempts = list(DOWNLOAD_PROGRESS.get('attempts') or [])
+            snapshot = DOWNLOAD_PROGRESS.setdefault(key, {})
+            attempts = list(snapshot.get('attempts') or [])
             attempts.append({'source': str(source), 'status': status,
                              'reason': str(reason or '')})
-            DOWNLOAD_PROGRESS['attempts'] = attempts[-30:]
-            return dict(DOWNLOAD_PROGRESS)
+            snapshot['attempts'] = attempts[-30:]
+            snapshot['updated_at'] = time.time()
+            return dict(snapshot)
 
-    def reset_download_progress(self):
+    def reset_download_progress(self, key=None):
         with _DOWNLOAD_PROGRESS_LOCK:
-            DOWNLOAD_PROGRESS.clear()
+            DOWNLOAD_PROGRESS.pop(self._progress_key(key), None)
 
     # ------------------------------------------------------------------
     # Public API
