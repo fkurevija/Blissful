@@ -189,6 +189,7 @@ class JobManager:
                     job['failure_reason'] = None
                     job['updated_at'] = _now()
                     job['attempts'] = int(job.get('attempts', 0)) + 1
+                    job['next_attempt_at'] = time.time()
                     self._persist()
                     return dict(job), True
         return None, False
@@ -424,10 +425,16 @@ class JobManager:
                     album=payload.get('album', ''),
                     tracks=payload.get('tracks', []),
                     target_path=payload.get('target_path', ''),
+                    should_cancel=lambda: (
+                        (self.get_job(job['id']) or {}).get('status') == 'cancelled'),
+                    retry_delay=self.retry_delay,
                 )
             else:
                 result = {'success': False, 'error': f"Unknown job type: {job.get('kind')}"}
-            status = 'succeeded' if result.get('success') else 'failed'
+            if result.get('cancelled'):
+                status, reason = 'cancelled', 'cancelled by user'
+            else:
+                status = 'succeeded' if result.get('success') else 'failed'
             failures = [{
                 'title': track.get('title'),
                 'error': track.get('error'),
@@ -455,17 +462,37 @@ class JobManager:
                         reason = 'cancelled by user'
                     current['status'] = status
                     current['failure_reason'] = reason
+                    completed = (result or {}).get(
+                        'completed_tracks', (result or {}).get('successful'))
+                    total = (result or {}).get('total_tracks')
                     current['result'] = {
                         'successful': (result or {}).get('successful'),
                         'failed': (result or {}).get('failed'),
-                        'total_tracks': (result or {}).get('total_tracks'),
+                        'total_tracks': total,
+                        'completed_tracks': completed,
+                        'rounds': (result or {}).get('rounds'),
+                        'cancelled': bool((result or {}).get('cancelled')),
                         'failures': failures[:50],
                     } if result else None
+                    if isinstance(completed, int) and isinstance(total, int):
+                        current['progress'] = {
+                            'phase': 'complete' if status == 'succeeded' else (
+                                'cancelled' if status == 'cancelled' else 'retrying'),
+                            'completed_tracks': completed,
+                            'current_track': completed,
+                            'total_tracks': total,
+                        }
                     current['finished_at'] = _now()
                     current['updated_at'] = _now()
                     break
             self._persist()
         self.append_log(job['id'], 'job finished', status=status,
+                        completed=(result or {}).get('completed_tracks')
+                        if isinstance(result, dict) else None,
+                        total=(result or {}).get('total_tracks')
+                        if isinstance(result, dict) else None,
+                        rounds=(result or {}).get('rounds')
+                        if isinstance(result, dict) else None,
                         imported=(result or {}).get('successful') if isinstance(result, dict) else None,
                         failure_reason=reason,
                         failures=failures[:5])

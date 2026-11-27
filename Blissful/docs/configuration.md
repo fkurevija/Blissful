@@ -637,10 +637,18 @@ config.json to restore synchronous album downloads.
 
 ### Automatic retries
 
-Failed download jobs, wanted-search runs and stale-cleanup runs retry on the
-same job indefinitely until they succeed or you cancel them. Retries use capped
-exponential backoff (30s, 1m, 2m, 4m, then 5m maximum, with jitter) so rate
-limits are respected; the Downloads tab shows `retry Ns` on pending jobs.
+Failed album download jobs retry **per track**: a failed track does not stop
+the rest of the album, and only the tracks that failed are attempted again in
+the next round. Rounds continue until every track succeeds or you cancel the
+job; successful tracks are never re-downloaded. Wanted-search and stale-cleanup
+runs retry on the same job indefinitely when the run itself fails. Retries use
+capped exponential backoff (30s, 1m, 2m, 4m, then 5m maximum, with jitter) so
+rate limits are respected; the Downloads tab shows `retry Ns` on pending jobs.
 **Cancel** on a pending or running job stops further retries permanently —
 cancelled jobs are never revived. Retries do not survive a container restart:
 jobs left running at shutdown are marked cancelled on startup.
+
+Job state, log entries and the details progress bar all report the same
+`completed/total tracks` counter, plus the current retry round. A job whose
+tracks keep failing holds the single worker between rounds; cancel it to free
+the queue for other jobs.

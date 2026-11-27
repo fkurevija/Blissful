@@ -2175,7 +2175,10 @@ class WantedSearchService:
 
             due = job.get('next_attempt_at')
 
-            if not isinstance(due, (int, float)) or due > now:
+            # A manual retry (or a legacy record) has no due timestamp;
+            # treat it as due instead of leaving it pending forever.
+
+            if isinstance(due, (int, float)) and due > now:
 
                 continue
 
@@ -2199,21 +2202,33 @@ class WantedSearchService:
 
                 if job.get('kind') == 'search':
 
-                    self.search(album_ids=payload.get('album_ids'),
+                    result = self.search(album_ids=payload.get('album_ids'),
 
-                                apply=bool(payload.get('apply', False)),
+                                         apply=bool(payload.get('apply', False)),
 
-                                retry_job_id=job['id'])
+                                         retry_job_id=job['id'])
 
                 else:
 
-                    self.cleanup_stale(record_ids=payload.get('record_ids'),
+                    result = self.cleanup_stale(record_ids=payload.get('record_ids'),
 
-                                       apply=bool(payload.get('apply', False)),
+                                               apply=bool(payload.get('apply', False)),
 
-                                       wait_minutes=payload.get('wait_minutes', 10),
+                                               wait_minutes=payload.get('wait_minutes', 10),
 
-                                       retry_job_id=job['id'])
+                                               retry_job_id=job['id'])
+
+                if isinstance(result, dict) and result.get('already_running'):
+
+                    self.job_manager.update_job(
+
+                        job['id'], status='pending',
+
+                        next_attempt_at=time.time() + 30)
+
+                    logger.info('Wanted retry %s deferred: another run is active',
+
+                                job['id'])
 
             except Exception as exc:
 

@@ -298,8 +298,9 @@ function renderJobDetails(job) {
         detailsPane.insertBefore(summary, body);
     }
     summary.innerHTML = '';
-    const cur = progress.current_track || 0;
-    const tot = progress.total_tracks || 0;
+    const cur = progress.completed_tracks ?? progress.current_track
+        ?? result.completed_tracks ?? result.successful ?? 0;
+    const tot = progress.total_tracks ?? result.total_tracks ?? 0;
     if (tot > 0) {
         const bar = document.createElement('div');
         bar.className = 'job-progress';
@@ -372,6 +373,10 @@ function renderJobDetails(job) {
     if (progress.processed !== undefined && progress.total) add('Progress', `${progress.processed}/${progress.total}`);
     if (cur && tot) add('Track', `${cur}/${tot}`);
     add('Lidarr', progress.command_status || '');
+    if (result.completed_tracks !== undefined) {
+        add('Completed', `${result.completed_tracks}/${result.total_tracks ?? '?'}`);
+    }
+    if (result.rounds) add('Retry rounds', result.rounds);
     if (result.successful !== undefined) add('Imported', result.successful);
     if (result.failed !== undefined) add('Failed', result.failed);
     if (result.total_tracks !== undefined) add('Total tracks', result.total_tracks);
@@ -524,6 +529,10 @@ function renderJobDetails(job) {
         if (item.job_status) statusParts.push('job_status=' + item.job_status);
         if (item.download_status) statusParts.push('download_status=' + item.download_status);
         if (item.download_pending !== undefined) statusParts.push('download_pending=' + item.download_pending);
+        if (item.completed !== undefined && item.total !== undefined) {
+            statusParts.push(`tracks=${item.completed}/${item.total}`);
+        }
+        if (item.rounds !== undefined) statusParts.push('round=' + item.rounds);
         if (item.phase || statusParts.length) {
             const frag = document.createDocumentFragment();
             frag.appendChild(textRow('Phase / Status: '));
@@ -610,6 +619,10 @@ function renderJobDetails(job) {
         if (item.job_status) status.push('job_status=' + item.job_status);
         if (item.download_status) status.push('download_status=' + item.download_status);
         if (item.download_pending !== undefined) status.push('download_pending=' + item.download_pending);
+        if (item.completed !== undefined && item.total !== undefined) {
+            status.push(`tracks=${item.completed}/${item.total}`);
+        }
+        if (item.rounds !== undefined) status.push('round=' + item.rounds);
         lines.push(`○ Phase / Status: ${item.phase || ''}${status.length ? ' ( ' + status.join(' , ') + ' )' : ''}`);
         if (item.download_artist) lines.push(`○ Artist: ${item.download_artist}`);
         if (item.album_title) {

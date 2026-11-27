@@ -4,6 +4,8 @@ Handles album information, tracks, and bulk album downloads
 """
 
 import logging
+import random
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -169,129 +171,170 @@ class AlbumManager:
                 'error': str(e)
             }
     
-    def download_album(self, artist, album, tracks, target_path=''):
-        """
-        Download all tracks in an album
-        
-        Args:
-            artist: Artist name
-            album: Album name
-            tracks: List of track objects with title and optional target_path
-            target_path: Target directory path
-            
-        Returns:
-            dict: Download results for all tracks
+    def download_album(self, artist, album, tracks, target_path='',
+                       should_cancel=None, retry_delay=None):
+        """Download every track, retrying only the failures in later rounds.
+
+        A failed track never blocks the rest of the album: it is left pending
+        and picked up again on the next round. Job-managed calls pass
+        ``should_cancel`` so a user cancellation stops the loop immediately.
+        Direct (synchronous) calls keep the original single-pass behaviour.
         """
         try:
             logger.info(f"Downloading album: {artist} - {album} ({len(tracks)} tracks)")
-            
+            total = len(tracks)
+            managed = callable(should_cancel)
             results = {
                 'success': True,
+                'cancelled': False,
                 'album': album,
                 'artist': artist,
-                'total_tracks': len(tracks),
+                'total_tracks': total,
+                'completed_tracks': 0,
                 'successful': 0,
                 'failed': 0,
-                'tracks': []
+                'rounds': 0,
+                'tracks': [],
             }
-            
             config = self.config_manager.get_config()
-            
-            for track_index, track in enumerate(tracks, 1):
+            pending = list(tracks)
+            completed = []
+            failures = {}
+
+            def cancelled():
+                return bool(managed and should_cancel())
+
+            def wait_before_round(round_no):
+                if not managed:
+                    return
+                try:
+                    seconds = (retry_delay(round_no) if callable(retry_delay)
+                               else min(300.0, 30.0 * (2 ** (round_no - 1)))
+                               * random.uniform(0.8, 1.2))
+                except (TypeError, ValueError):
+                    seconds = 30.0
+                deadline = time.monotonic() + max(0.0, float(seconds))
+                while time.monotonic() < deadline:
+                    if cancelled():
+                        return
+                    time.sleep(min(1.0, max(0.0, deadline - time.monotonic())))
+
+            def progress(round_no):
                 try:
                     self.download_manager._set_download_progress(
-                        download_index=track_index, total_tracks=len(tracks))
+                        download_index=results['completed_tracks'],
+                        total_tracks=total,
+                        completed_tracks=results['completed_tracks'],
+                        failed_tracks=len(pending),
+                        round=round_no,
+                    )
                 except Exception:
                     pass
-                track_result = {
-                    'title': track.get('title'),
-                    'success': False,
-                    'error': None
-                }
-                
-                try:
-                    # Lidarr reports track durations in milliseconds; the
-                    # download manager expects seconds for its duration hint.
-                    expected_duration = self._duration_seconds(track.get('duration'))
 
-                    # Download track
-                    download_kwargs = {
-                        'artist': artist,
+            while pending:
+                if cancelled():
+                    results['cancelled'] = True
+                    break
+                results['rounds'] += 1
+                round_no = results['rounds']
+                next_pending = []
+                for track in pending:
+                    if cancelled():
+                        break
+                    progress(round_no)
+                    track_result = {
                         'title': track.get('title'),
-                        'album': album,
-                        'output_format': config.get('output_format', 'mp3'),
-                        'source_priorities': config.get('source_priorities', []),
-                        'expected_duration': expected_duration,
+                        'success': False,
+                        'error': None,
                     }
                     try:
-                        download_result = self.download_manager.download_track(**download_kwargs)
-                    except TypeError as exc:
-                        if 'expected_duration' not in str(exc):
-                            raise
-                        download_kwargs.pop('expected_duration')
-                        download_result = self.download_manager.download_track(**download_kwargs)
-                    
-                    if download_result['success']:
-                        # Convert track
-                        converted_file = self.audio_converter.convert(
-                            input_file=download_result['file_path'],
-                            output_format=config.get('output_format', 'mp3'),
-                            quality=config.get('quality', '320k')
-                        )
+                        expected_duration = self._duration_seconds(track.get('duration'))
+                        download_kwargs = {
+                            'artist': artist,
+                            'title': track.get('title'),
+                            'album': album,
+                            'output_format': config.get('output_format', 'mp3'),
+                            'source_priorities': config.get('source_priorities', []),
+                            'expected_duration': expected_duration,
+                        }
+                        try:
+                            download_result = self.download_manager.download_track(**download_kwargs)
+                        except TypeError as exc:
+                            if 'expected_duration' not in str(exc):
+                                raise
+                            download_kwargs.pop('expected_duration')
+                            download_result = self.download_manager.download_track(**download_kwargs)
 
-                        # Tag before moving the file into the library.
-                        if self._is_enabled(config, 'embed_metadata'):
-                            thumbnail = None
-                            if self._is_enabled(config, 'embed_thumbnail'):
-                                thumbnail = download_result.get('thumbnail_path')
-                            self.audio_converter.add_metadata(
-                                converted_file,
-                                artist=artist,
-                                album_artist=artist,
-                                title=track.get('title'),
-                                album=album,
-                                year=self._first_value(track, 'year', 'releaseYear', 'release_year'),
-                                track_number=track.get('trackNumber'),
-                                disc=self._first_value(track, 'mediumNumber', 'discNumber', 'disc_number'),
-                                genre=track.get('genre'),
-                                thumbnail_path=thumbnail,
+                        if download_result['success']:
+                            converted_file = self.audio_converter.convert(
+                                input_file=download_result['file_path'],
+                                output_format=config.get('output_format', 'mp3'),
+                                quality=config.get('quality', '320k'),
                             )
-                        
-                        # Move to the track's exact Lidarr target when provided.
-                        # Failed-import recovery relies on files landing at the
-                        # path Lidarr's naming template expects, not in temp.
-                        exact_target = track.get('target_path') or target_path
-                        if exact_target:
-                            final_path = self.download_manager.move_to_target(
-                                source_file=converted_file,
-                                target_path=exact_target,
-                                path_mapping=config.get('lidarr_path_mapping') or None
-                            )
-                            track_result['file_path'] = final_path
+                            if self._is_enabled(config, 'embed_metadata'):
+                                thumbnail = None
+                                if self._is_enabled(config, 'embed_thumbnail'):
+                                    thumbnail = download_result.get('thumbnail_path')
+                                self.audio_converter.add_metadata(
+                                    converted_file,
+                                    artist=artist,
+                                    album_artist=artist,
+                                    title=track.get('title'),
+                                    album=album,
+                                    year=self._first_value(track, 'year', 'releaseYear', 'release_year'),
+                                    track_number=track.get('trackNumber'),
+                                    disc=self._first_value(track, 'mediumNumber', 'discNumber', 'disc_number'),
+                                    genre=track.get('genre'),
+                                    thumbnail_path=thumbnail,
+                                )
+                            exact_target = track.get('target_path') or target_path
+                            if exact_target:
+                                final_path = self.download_manager.move_to_target(
+                                    source_file=converted_file,
+                                    target_path=exact_target,
+                                    path_mapping=config.get('lidarr_path_mapping') or None,
+                                )
+                                track_result['file_path'] = final_path
+                            else:
+                                track_result['file_path'] = converted_file
+                            track_result['success'] = True
+                            results['successful'] += 1
+                            results['completed_tracks'] += 1
+                            completed.append(track_result)
                         else:
-                            track_result['file_path'] = converted_file
-                        
-                        track_result['success'] = True
-                        results['successful'] += 1
-                    else:
-                        track_result['error'] = download_result.get('error')
-                        track_result['attempts'] = download_result.get('attempts') or []
-                        results['failed'] += 1
-                        
-                except Exception as e:
-                    logger.error(f"Error downloading track {track.get('title')}: {e}")
-                    track_result['error'] = str(e)
-                    results['failed'] += 1
-                
-                results['tracks'].append(track_result)
-            
-            results['success'] = results['failed'] < results['total_tracks']
-            
+                            track_result['error'] = download_result.get('error')
+                            track_result['attempts'] = download_result.get('attempts') or []
+                            failures[id(track)] = track_result
+                    except Exception as e:
+                        logger.error(f"Error downloading track {track.get('title')}: {e}")
+                        track_result['error'] = str(e)
+                        failures[id(track)] = track_result
+                    if not track_result['success']:
+                        next_pending.append(track)
+
+                pending = next_pending
+                results['failed'] = len(pending)
+                progress(results['rounds'])
+                if not managed and pending:
+                    break
+                if pending and not cancelled():
+                    logger.info(
+                        'Album %s - %s: %s/%s tracks complete, %s left; retry round %s',
+                        artist, album, results['completed_tracks'], total,
+                        len(pending), results['rounds'] + 1)
+                    wait_before_round(results['rounds'])
+
+            results['tracks'] = completed + [
+                failures[id(t)] for t in pending if id(t) in failures]
+            results['failed'] = len(pending)
+            results['success'] = not pending and not results['cancelled']
             return results
-            
         except Exception as e:
             logger.error(f"Error downloading album: {e}", exc_info=True)
             return {
                 'success': False,
-                'error': str(e)
+                'error': str(e),
+                'total_tracks': len(tracks),
+                'completed_tracks': 0,
+                'tracks': [],
             }
