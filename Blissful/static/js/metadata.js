@@ -8,7 +8,7 @@ const METADATA_PROVIDERS = [
     {
         key: 'spotify',
         name: 'Spotify',
-        mode: 'Refines the search query',
+        mode: 'Enriches download tags',
         enabledKey: 'spotify_metadata_enabled',
         fields: [
             {id: 'spotifyClientId', configKey: 'spotify_client_id', label: 'Spotify Client ID',
@@ -22,7 +22,7 @@ const METADATA_PROVIDERS = [
     {
         key: 'discogs',
         name: 'Discogs',
-        mode: 'Refines the search query',
+        mode: 'Enriches download tags',
         enabledKey: 'discogs_metadata_enabled',
         fields: [
             {id: 'discogsToken', configKey: 'discogs_token', label: 'Discogs Personal Access Token',
@@ -33,7 +33,7 @@ const METADATA_PROVIDERS = [
     {
         key: 'musicbrainz',
         name: 'MusicBrainz',
-        mode: 'Refines the search query - no account needed',
+        mode: 'Enriches download tags - no account needed',
         enabledKey: 'musicbrainz_metadata_enabled',
         fields: []
     },

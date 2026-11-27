@@ -110,6 +110,11 @@ function createSourcePriorityItem(source, index) {
     `;
 
     if (/youtube/i.test(source.name || '') || /youtube/i.test(source.search || '')) {
+        const hint = document.createElement('span');
+        hint.className = 'source-hint';
+        hint.textContent = '▾';
+        div.querySelector('.source-controls').appendChild(hint);
+        hint.addEventListener('click', () => div.classList.toggle('expanded'));
         const fields = document.createElement('div');
         fields.className = 'source-fields';
         fields.innerHTML = `
