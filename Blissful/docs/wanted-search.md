@@ -27,6 +27,23 @@ run is active (including runs started by the scheduler or another tab).
 - **Cleanup interval (hours)** — default 6; **Import wait per album (minutes)** —
   default 10. Changes to the interval are picked up on restart.
 
+### Progress during a search
+
+Each source can inspect up to `search_results_per_source` candidates (default 3).
+While yt-dlp walks that list, the active status reports
+`download_candidate_current` / `download_candidate_total`, so the toast and job
+details keep moving instead of appearing frozen between source attempts.
+Only the selected candidate is downloaded — the search page is inspected once,
+then that result is processed, so a depth of 10 no longer fetches 10 videos.
+
+### Already-imported albums
+
+Cleanup records an album as imported as soon as gap-fill succeeds, before the
+Lidarr queue entry is deleted. A later run also skips any album with a
+successful album job in the last 24 hours, so a slow Lidarr library scan cannot
+cause the same album to be downloaded twice. Queue entries are still deleted
+only after import is confirmed.
+
 ## Wanted / missing albums
 
 1. Click **Load list** (Lidarr's Wanted → Missing list, paginated at 200/page).

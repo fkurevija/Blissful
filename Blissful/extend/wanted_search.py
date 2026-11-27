@@ -59,6 +59,7 @@ import os
 import threading
 
 import time
+from datetime import datetime
 
 from pathlib import Path
 
@@ -280,6 +281,37 @@ class WantedSearchService:
         return {'status': 'failed', 'reason': 'Blissful gap-fill engine unavailable'}
 
 
+
+    def _recently_imported_album(self, album_id):
+        """True when a successful album job imported this album in the last day.
+
+        Lidarr can keep reporting tracks as missing until its library scan
+        catches up, so the queue alone is not enough to decide that a stale
+        torrent still needs a re-download.
+        """
+        if self.job_manager is None:
+            return False
+        try:
+            jobs = self.job_manager.list_jobs(limit=500, include_children=True) or []
+        except Exception:
+            return False
+        cutoff = time.time() - 24 * 3600
+        for job in jobs:
+            if job.get('kind') != 'album' or job.get('status') != 'succeeded':
+                continue
+            raw = job.get('finished_at') or job.get('updated_at')
+            try:
+                finished = datetime.fromisoformat(
+                    str(raw).replace('Z', '+00:00')).timestamp()
+            except Exception:
+                finished = 0
+            if finished < cutoff:
+                continue
+            payload = job.get('payload') or {}
+            job_album = payload.get('album_id') or payload.get('foreignAlbumId')
+            if str(job_album or '') == str(album_id):
+                return True
+        return False
 
     # --------------------------------------------------------- single flight
 
@@ -1854,6 +1886,16 @@ class WantedSearchService:
 
                     continue
 
+                if self._recently_imported_album(album_id):
+
+                    report['skipped'].append({'album': album_id,
+
+                                              'title': title,
+
+                                              'reason': 'already imported successfully'})
+
+                    continue
+
                 baseline, baseline_missing = baseline_cache[album_id]
 
                 if baseline_missing == 0:
@@ -2068,6 +2110,15 @@ class WantedSearchService:
                     'engine': 'blissful' if self._prefer_gapfill() else 'lidarr',
 
                 })
+
+                # Record the album as imported before touching the queue so a
+                # failed delete or crash cannot make the next run grab it again.
+                albums_state[str(album_id)] = {
+                    'timestamp': time.strftime('%Y-%m-%dT%H:%M:%S'),
+                    'album': album_id,
+                    'title': title,
+                    'status': 'imported',
+                }
 
                 progress_state['done_before'] += gap.get('imported') or 0
 

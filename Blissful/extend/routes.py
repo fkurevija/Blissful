@@ -452,6 +452,25 @@ def register_routes(app, config_manager, lidarr_client, download_manager,
     @app.route('/api/wanted/status', methods=['GET'])
     def wanted_status():
         config = config_manager.get_config()
+        active = wanted_search.get_active() if wanted_search else None
+        # Live download progress changes faster than job phase boundaries;
+        # merge it on read so a long search visibly advances in the UI.
+        if active and download_manager is not None:
+            try:
+                snap = download_manager.get_download_progress() or {}
+                mapping = {
+                    'status': 'download_status',
+                    'source': 'download_source',
+                    'attempts': 'download_attempts',
+                    'pending': 'download_pending',
+                    'candidate_index': 'download_candidate_current',
+                    'candidate_total': 'download_candidate_total',
+                }
+                for source_key, target_key in mapping.items():
+                    if source_key in snap:
+                        active[target_key] = snap[source_key]
+            except Exception:
+                pass
         return jsonify({
             'success': True,
             'wanted_search_enabled': bool(config.get('wanted_search_enabled')),
@@ -463,7 +482,7 @@ def register_routes(app, config_manager, lidarr_client, download_manager,
             'stale_cleanup_remove_from_client': bool(config.get('stale_cleanup_remove_from_client', True)),
             'wanted_search_timeout_minutes': config.get('wanted_search_timeout_minutes', 10),
             'prefer_blissful_for_wanted': bool(config.get('prefer_blissful_for_wanted', True)),
-            'active': (wanted_search.get_active() if wanted_search else None),
+            'active': active,
             'last_activity': (wanted_search.get_last_activity()
                               if wanted_search else None),
         })

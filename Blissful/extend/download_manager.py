@@ -3,6 +3,7 @@ import os
 import json
 import threading
 import logging
+import re
 import shutil
 from pathlib import Path
 from typing import Dict, Optional, Any
@@ -17,6 +18,39 @@ except (ImportError, ValueError):  # pragma: no cover - standalone module import
         BandcampResolver = None
 
 logger = logging.getLogger(__name__)
+
+
+class _ProgressLogger:
+    """Forward yt-dlp logs and surface search-candidate progress."""
+
+    _ITEM = re.compile(r'Downloading item (\d+) of (\d+)', re.I)
+
+    def __init__(self, sink, base=None):
+        self._sink = sink
+        self._base = base or logger
+
+    def _emit(self, level, message, *args, **kwargs):
+        getattr(self._base, level)(message, *args, **kwargs)
+        match = self._ITEM.search(str(message))
+        if match:
+            try:
+                self._sink(candidate_index=int(match.group(1)),
+                           candidate_total=int(match.group(2)))
+            except Exception:
+                pass
+
+    def debug(self, message, *args, **kwargs):
+        self._emit('debug', message, *args, **kwargs)
+
+    def info(self, message, *args, **kwargs):
+        self._emit('info', message, *args, **kwargs)
+
+    def warning(self, message, *args, **kwargs):
+        self._emit('warning', message, *args, **kwargs)
+
+    def error(self, message, *args, **kwargs):
+        self._emit('error', message, *args, **kwargs)
+
 
 try:
     from . import youtube_login
@@ -283,6 +317,11 @@ class DownloadManager:
                 pass
             self._youtube_cookies_written = None
 
+        # yt-dlp walks search-result pages one candidate at a time; expose
+        # that position so a long search shows movement instead of looking
+        # frozen between source attempts.
+        ydl_opts['logger'] = _ProgressLogger(self._set_download_progress)
+
         return ydl_opts
 
     # ----------------------------------------------------------- progress
@@ -378,7 +417,8 @@ class DownloadManager:
 
             self._set_download_progress(
                 artist=artist, album=album or '', title=title,
-                source=None, status='searching', attempts=[], pending=len(sources))
+                source=None, status='searching', attempts=[], pending=len(sources),
+                candidate_index=0, candidate_total=0)
 
             tolerance = self._duration_tolerance()
             downloaded_file = None
@@ -750,13 +790,20 @@ class DownloadManager:
                 # Extract info first to verify there is a result.
                 try:
                     info = ydl.extract_info(source, download=False)
-                    if not info or ('entries' in info and not info['entries']):
+                    if not info or ('entries' in info and not info.get('entries')):
                         return {'success': False, 'error': 'No results found'}
 
-                    info = ydl.extract_info(source, download=True)
-                    if isinstance(info, dict) and 'entries' in info:
-                        entries = info.get('entries') or []
-                        info = entries[0] if entries else None
+                    # Re-running extract_info(source, download=True) on a search
+                    # URL downloads every candidate in the result page (10
+                    # full videos) before we pick the first one. Process the
+                    # already-extracted result instead, so only the chosen
+                    # candidate is fetched.
+                    entries = info.get('entries') if isinstance(info, dict) else None
+                    if entries is not None:
+                        info = next((entry for entry in entries if entry), None)
+                    if info is None:
+                        return {'success': False, 'error': 'No results found'}
+                    ydl.process_ie_result(info, download=True)
                 except Exception as e:
                     logger.warning(f"Extraction failed for {source}: {e}")
                     return {'success': False, 'error': str(e)}

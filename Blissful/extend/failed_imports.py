@@ -490,11 +490,21 @@ class FailedImportsRetry:
                 if downloader is not None and hasattr(downloader,
                                                       'get_download_progress'):
                     snap = downloader.get_download_progress() or {}
-                    for key in ('title', 'artist', 'source', 'status', 'download_index', 'total_tracks',
-                                'attempts', 'pending'):
+                    mapping = {
+                        'title': 'download_track',
+                        'artist': 'download_artist',
+                        'source': 'download_source',
+                        'status': 'download_status',
+                        'download_index': 'download_download_index',
+                        'total_tracks': 'download_total_tracks',
+                        'attempts': 'download_attempts',
+                        'pending': 'download_pending',
+                        'candidate_index': 'download_candidate_current',
+                        'candidate_total': 'download_candidate_total',
+                    }
+                    for key, name in mapping.items():
                         if key in snap:
-                            name = 'track' if key == 'title' else key
-                            payload['download_' + name] = snap[key]
+                            payload[name] = snap[key]
             except Exception:
                 pass
             try:

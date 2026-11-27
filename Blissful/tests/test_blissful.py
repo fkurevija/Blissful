@@ -4,8 +4,10 @@ Run with:  python -m pytest tests -q
 """
 
 import json
+import logging
 import os
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -919,6 +921,129 @@ def test_wanted_status_route_exposes_progress():
     with app.test_client() as client:
         data = client.get('/api/wanted/status').get_json()
     assert data['active']['phase'] == 'waiting for import'
+
+
+def test_search_downloads_only_selected_candidate(tmp_path, monkeypatch):
+    import extend.download_manager as dm
+
+    calls = []
+
+    class FakeYDL:
+        def __init__(self, opts):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def extract_info(self, url, download=False):
+            calls.append(('extract', download))
+            return {'entries': [
+                {'id': 'first', 'title': 'A'},
+                {'id': 'second', 'title': 'B'},
+            ]}
+
+        def process_ie_result(self, info, download=True):
+            calls.append(('process', info['id'], download))
+            return info
+
+    monkeypatch.setattr(dm.yt_dlp, 'YoutubeDL', FakeYDL)
+    manager = dm.DownloadManager(str(tmp_path))
+    manager.temp_dir.mkdir(parents=True, exist_ok=True)
+    (manager.temp_dir / 'Artist - Title.mp3').write_bytes(b'x')
+    manager._download_from_source('ytsearch2:Artist - Title', 'Artist', 'Title')
+    assert calls == [('extract', False), ('process', 'first', True)]
+
+
+def test_progress_logger_reports_search_candidate_position():
+    from extend.download_manager import _ProgressLogger
+
+    seen = []
+    sink = lambda **details: seen.append(details)
+    log = _ProgressLogger(sink, base=logging.getLogger('test-progress'))
+    log.info('[download] Downloading item 3 of 10')
+    log.debug('[download] Downloading item 7 of 10')
+    log.info('nothing interesting')
+    assert seen == [
+        {'candidate_index': 3, 'candidate_total': 10},
+        {'candidate_index': 7, 'candidate_total': 10},
+    ]
+
+
+def test_wanted_status_merges_live_candidate_progress():
+    from flask import Flask
+    from extend.routes import register_routes
+
+    class Stub:
+        def __init__(self, *a, **k):
+            pass
+
+    class Config:
+        def get_config(self):
+            return {'wanted_search_enabled': True, 'stale_cleanup_enabled': False,
+                    'stale_cleanup_interval_hours': 6,
+                    'stale_cleanup_wait_minutes': 10}
+
+    class Wanted:
+        def get_active(self):
+            return {'kind': 'cleanup', 'phase': 'download job running'}
+
+        def get_last_activity(self):
+            return None
+
+    class Download:
+        def get_download_progress(self):
+            return {'candidate_index': 4, 'candidate_total': 10,
+                    'status': 'trying', 'source': 'ytsearch10:x',
+                    'attempts': [], 'pending': 6}
+
+    app = Flask(__name__)
+    register_routes(app=app, config_manager=Config(), lidarr_client=Stub,
+                    download_manager=Download(), audio_converter=Stub(),
+                    source_manager=Stub(), auth_manager=Stub(),
+                    request_manager=Stub(), album_manager=Stub(),
+                    track_manager=Stub(), sources_api=Stub(), system_utils=Stub(),
+                    job_manager=None, wanted_search=Wanted())
+    with app.test_client() as client:
+        data = client.get('/api/wanted/status').get_json()
+    assert data['active']['download_candidate_current'] == 4
+    assert data['active']['download_candidate_total'] == 10
+    assert data['active']['download_status'] == 'trying'
+
+
+def test_cleanup_skips_album_already_imported_by_job_history(tmp_path):
+    class Config:
+        def get_setting(self, key, default=None):
+            return default
+
+    manager = JobManager(Config(), None, str(tmp_path / 'jobs.json'))
+    job, _ = manager.enqueue('album', {'album_id': 10, 'artist': 'A', 'album': 'B'})
+    manager.jobs[0]['status'] = 'succeeded'
+    manager.jobs[0]['finished_at'] = datetime.now(timezone.utc).isoformat()
+    manager._persist()
+
+    class Client:
+        def get_all_queue_records(self, page_size=200):
+            return [{'id': 11, 'albumId': 10, 'downloadId': 'd1', 'title': 'B',
+                     'errorMessage': 'The download is stalled with no connections'}]
+
+        def get_album_tracks(self, aid):
+            return [{'title': 't1', 'hasFile': False}]
+
+    calls = []
+
+    class Gapfill:
+        def gapfill_album(self, aid, apply=True, source='', progress=None, **kwargs):
+            calls.append(aid)
+            return {'status': 'succeeded', 'imported': 1}
+
+    svc = _wanted_service(tmp_path, client=Client(), gapfill=Gapfill())
+    svc.job_manager = manager
+    report = svc.cleanup_stale(apply=True, wait_minutes=1)
+    assert calls == []
+    assert any('already imported successfully' in str(s) for s in report['skipped'])
 
 
 def test_wanted_single_flight_blocks_second_run(tmp_path):
