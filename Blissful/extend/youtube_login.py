@@ -93,7 +93,28 @@ class YouTubeLoginService:
         # unless autoconnect is set. Skip it so the embedded window goes
         # straight to the browser running on the server.
         separator = '&' if '?' in base_url else '?'
-        return f'{base_url}{separator}autoconnect=1'
+        return f'{base_url}{separator}autoconnect=1&resize=scale'
+
+    @staticmethod
+    def _chrome_options():
+        """Build Chrome options that Google treats as a normal browser.
+
+        Selenium's default ``enable-automation`` switch and AutomationControlled
+        blink feature make Google refuse sign-in with "This browser or app may
+        not be secure". Remove both, and keep the window size aligned with the
+        noVNC screen in docker-compose.yml.
+        """
+        options = Options()
+        options.add_argument('--no-sandbox')
+        options.add_argument('--disable-dev-shm-usage')
+        options.add_argument('--disable-gpu')
+        options.add_argument('--no-first-run')
+        options.add_argument('--no-default-browser-check')
+        options.add_argument('--disable-blink-features=AutomationControlled')
+        options.add_argument('--window-size=1280,900')
+        options.add_experimental_option('excludeSwitches', ['enable-automation'])
+        options.add_experimental_option('useAutomationExtension', False)
+        return options
 
     def _close(self):
         global _DRIVER
@@ -136,13 +157,9 @@ class YouTubeLoginService:
                                  'Start it with: docker compose --profile '
                                  'youtube-login up -d youtube-login'}
             if _DRIVER is None:
-                options = Options()
-                options.add_argument('--no-sandbox')
-                options.add_argument('--disable-dev-shm-usage')
-                options.add_argument('--disable-gpu')
                 # No persistent Chrome profile: cookies are exported to
                 # Blissful's config on finish and reused by yt-dlp.
-                options.add_argument('--window-size=1280,900')
+                options = self._chrome_options()
                 try:
                     _DRIVER = webdriver.Remote(
                         command_executor=self.selenium_url,

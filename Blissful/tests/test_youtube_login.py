@@ -36,14 +36,23 @@ def test_service_defaults(monkeypatch):
     assert service.selenium_url == 'http://youtube-login:4444'
     assert service.novnc_port == '7900'
     assert service.novnc_url('media-of-moria:7373') == \
-        'http://media-of-moria:7900/?autoconnect=1'
+        'http://media-of-moria:7900/?autoconnect=1&resize=scale'
 
 
 def test_novnc_url_keeps_explicit_query(monkeypatch):
     monkeypatch.setenv('YOUTUBE_NOVNC_URL', 'https://proxy.example/novnc?foo=bar')
     service = YouTubeLoginService()
     assert service.novnc_url('ignored:7373') == \
-        'https://proxy.example/novnc?foo=bar&autoconnect=1'
+        'https://proxy.example/novnc?foo=bar&autoconnect=1&resize=scale'
+
+
+def test_chrome_options_hide_automation():
+    options = YouTubeLoginService._chrome_options()
+    assert '--disable-blink-features=AutomationControlled' in options.arguments
+    assert '--window-size=1280,900' in options.arguments
+    chrome = options.to_capabilities()['goog:chromeOptions']
+    assert 'enable-automation' in chrome['excludeSwitches']
+    assert chrome['useAutomationExtension'] is False
 
 
 def test_finish_without_session():
