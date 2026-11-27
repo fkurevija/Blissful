@@ -58,6 +58,15 @@
 .sources-active-section .form-group small { display: block; margin-top: 5px; color: var(--text-muted); font-size: 0.85rem; }
 .source-priority-item { flex-wrap: wrap; }
 .source-hint { font-size: 1.1rem; color: var(--text-muted); cursor: pointer; }
+.youtube-login-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.youtube-login-status { color: var(--text-muted); font-size: 0.85rem; }
+.youtube-login-modal { position: fixed; inset: 0; z-index: 10000; background: rgba(0,0,0,.65); align-items: center; justify-content: center; }
+.youtube-login-modal-inner { width: min(1100px, 95vw); height: min(760px, 90vh); display: flex; flex-direction: column; background: var(--bg-color); border: 1px solid var(--border-color); border-radius: 10px; overflow: hidden; }
+.youtube-login-modal-header, .youtube-login-modal-footer { padding: 10px 14px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid var(--border-color); }
+.youtube-login-modal-footer { border-bottom: 0; border-top: 1px solid var(--border-color); }
+.youtube-login-modal-footer span { flex: 1; color: var(--text-muted); font-size: 0.85rem; }
+.youtube-login-close { margin-left: auto; border: 0; background: transparent; color: var(--text-color); font-size: 1.4rem; cursor: pointer; }
+.youtube-login-modal iframe { flex: 1; width: 100%; border: 0; background: #000; }
 .source-priority-item.expanded .source-hint { transform: rotate(180deg); }
 .source-fields { display: none; flex: 0 0 100%; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border-color); }
 .source-priority-item.expanded .source-fields { display: block; }

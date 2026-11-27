@@ -140,17 +140,24 @@ async function loadConfiguration() {
         // Load source priorities
         const priorities = config.source_priorities || [];
         loadSourcePriorities(priorities);
-        const youtubeCookies = document.getElementById('youtubeCookies');
-        if (youtubeCookies) {
+        const youtubeCookieFields = [...document.querySelectorAll('.youtube-cookies-field')];
+        if (youtubeCookieFields.length) {
             const savedCookies = config.youtube_cookies;
-            if (savedCookies === '***MASKED***') {
-                youtubeCookies.value = '';
-                youtubeCookies.dataset.hasSavedKey = 'true';
-                youtubeCookies.placeholder = 'Cookies configured (leave blank to keep)';
-            } else {
-                youtubeCookies.value = savedCookies || '';
-                youtubeCookies.dataset.hasSavedKey = 'false';
-            }
+            const masked = savedCookies === '***MASKED***';
+            youtubeCookieFields.forEach(field => {
+                field.value = masked ? '' : (savedCookies || '');
+                field.dataset.hasSavedKey = masked ? 'true' : 'false';
+                field.placeholder = masked
+                    ? 'Cookies configured (leave blank to keep)'
+                    : 'Or paste Netscape-format cookies.txt from a signed-in browser';
+                field.addEventListener('input', () => {
+                    youtubeCookieFields.forEach(other => {
+                        if (other !== field) other.value = field.value;
+                    });
+                });
+            });
+            checkYouTubeLoginStatus();
+            setTimeout(checkYouTubeLoginStatus, 300);
         }
         
         // Load request system settings
@@ -208,7 +215,7 @@ async function saveConfiguration() {
             lidarr_path_mapping: getPathMappings(),
             source_priorities: getSourcePriorities(),
             youtube_cookies: (() => {
-                const field = document.getElementById('youtubeCookies');
+                const field = document.querySelector('.youtube-cookies-field');
                 if (!field) return undefined;
                 const value = field.value.trim();
                 if (!value && field.dataset.hasSavedKey === 'true') {
@@ -329,3 +336,78 @@ async function testLidarrConnection() {
         resultDiv.textContent = '❌ Connection failed: ' + error.message;
     }
 }
+
+function showYouTubeToast(message, type) {
+    let el = document.getElementById('youtube-login-toast');
+    if (!el) {
+        el = document.createElement('div');
+        el.id = 'youtube-login-toast';
+        el.style.cssText = 'position:fixed;bottom:20px;right:20px;z-index:10001;padding:12px 16px;border-radius:8px;color:white;box-shadow:0 4px 16px rgba(0,0,0,.3)';
+        document.body.appendChild(el);
+    }
+    el.textContent = message;
+    el.style.background = type === 'error' ? '#b91c1c' : '#047857';
+    el.style.display = 'block';
+    clearTimeout(el._timer);
+    el._timer = setTimeout(() => { el.style.display = 'none'; }, 5000);
+}
+
+// Optional embedded YouTube login (compose --profile youtube-login).
+async function checkYouTubeLoginStatus() {
+    try {
+        const res = await fetch('/api/youtube/login/status');
+        const data = await res.json();
+        document.querySelectorAll('.youtube-login-status').forEach(el => {
+            if (!data.available) {
+                el.textContent = 'Login browser not enabled (optional profile).';
+            } else if (data.relogin_required) {
+                el.textContent = 'Session expired - login again.';
+            } else if (data.active) {
+                el.textContent = 'Browser open - finish sign-in in the window.';
+            } else if (data.has_cookies) {
+                el.textContent = 'Signed in.';
+            } else {
+                el.textContent = 'Not signed in.';
+            }
+        });
+    } catch (e) {
+        document.querySelectorAll('.youtube-login-status').forEach(el => {
+            el.textContent = 'Login status unavailable.';
+        });
+    }
+}
+
+async function startYouTubeLogin() {
+    const res = await fetch('/api/youtube/login/start', {method: 'POST'});
+    const data = await res.json();
+    if (!data.success) {
+        showYouTubeToast(data.error || 'Could not start YouTube login', 'error');
+        return;
+    }
+    const modal = document.getElementById('youtubeLoginModal');
+    document.getElementById('youtubeLoginFrame').src = data.novnc_url;
+    modal.style.display = 'flex';
+    checkYouTubeLoginStatus();
+}
+
+async function finishYouTubeLogin() {
+    const res = await fetch('/api/youtube/login/finish', {method: 'POST'});
+    const data = await res.json();
+    if (!data.success) {
+        showYouTubeToast(data.error || 'Could not save YouTube cookies', 'error');
+        return;
+    }
+    closeYouTubeLogin();
+    showYouTubeToast(`YouTube login saved (${data.cookie_count} cookies)`, 'success');
+    await loadConfiguration();
+}
+
+async function closeYouTubeLogin() {
+    document.getElementById('youtubeLoginModal').style.display = 'none';
+    document.getElementById('youtubeLoginFrame').src = 'about:blank';
+    await fetch('/api/youtube/login/cancel', {method: 'POST'});
+    checkYouTubeLoginStatus();
+}
+
+document.addEventListener('DOMContentLoaded', checkYouTubeLoginStatus);
+setInterval(checkYouTubeLoginStatus, 120000);

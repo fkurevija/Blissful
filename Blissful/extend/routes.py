@@ -6,6 +6,8 @@ Defines all Flask routes and integrates with manager classes
 from flask import request, jsonify, render_template, Response
 import logging
 
+from .youtube_login import YouTubeLoginService
+
 logger = logging.getLogger(__name__)
 
 
@@ -32,6 +34,8 @@ def register_routes(app, config_manager, lidarr_client, download_manager,
         system_utils: System utilities
     """
     
+    youtube_login = YouTubeLoginService()
+
     # ==================== PAGE ROUTES ====================
     
     @app.route('/')
@@ -70,6 +74,30 @@ def register_routes(app, config_manager, lidarr_client, download_manager,
             logger.debug("Lidarr health probe failed: %s", exc)
         return jsonify(health)
     
+    @app.route('/api/youtube/login/status', methods=['GET'])
+    def youtube_login_status():
+        """Report whether the optional browser login sidecar is usable."""
+        status = youtube_login.status()
+        config = config_manager.get_config()
+        status['has_cookies'] = bool(config.get('youtube_cookies'))
+        return jsonify(status)
+
+    @app.route('/api/youtube/login/start', methods=['POST'])
+    def youtube_login_start():
+        result = youtube_login.start()
+        if result.get('success'):
+            result['novnc_url'] = youtube_login.novnc_url(request.host)
+        return jsonify(result), 200 if result.get('success') else 503
+
+    @app.route('/api/youtube/login/finish', methods=['POST'])
+    def youtube_login_finish():
+        result = youtube_login.finish(config_manager)
+        return jsonify(result), 200 if result.get('success') else 400
+
+    @app.route('/api/youtube/login/cancel', methods=['POST'])
+    def youtube_login_cancel():
+        return jsonify(youtube_login.cancel())
+
     @app.route('/api/config', methods=['GET'])
     def get_config():
         """Get current configuration"""

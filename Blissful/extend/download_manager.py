@@ -18,6 +18,11 @@ except (ImportError, ValueError):  # pragma: no cover - standalone module import
 
 logger = logging.getLogger(__name__)
 
+try:
+    from . import youtube_login
+except (ImportError, ValueError):  # pragma: no cover - standalone import
+    youtube_login = None
+
 # Live download progress for the Wanted tab. One worker processes jobs, so a
 # single snapshot is enough; reads from the web thread are guarded.
 DOWNLOAD_PROGRESS = {}
@@ -466,6 +471,10 @@ class DownloadManager:
                 attempts = self.get_download_progress().get('attempts') or []
             except Exception:
                 pass
+            _bot = 'Sign in to confirm' in str(last_error or '') or (
+                'bot' in str(last_error or '').lower())
+            if _bot and youtube_login:
+                youtube_login.mark_relogin_required()
             return {
                 'success': False,
                 'error': last_error or 'Could not find track from any source',

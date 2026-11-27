@@ -19,6 +19,7 @@ function loadSourcePriorities(priorities) {
         // Will be populated after API loads
         setTimeout(() => {
             populateAllSearchableSources();
+            if (typeof checkYouTubeLoginStatus === 'function') checkYouTubeLoginStatus();
         }, 100);
         return;
     }
@@ -29,6 +30,7 @@ function loadSourcePriorities(priorities) {
     });
     
     updatePriorityBadges();
+    if (typeof checkYouTubeLoginStatus === 'function') checkYouTubeLoginStatus();
 }
 
 // Populate all searchable sources from API
@@ -67,6 +69,7 @@ async function populateAllSearchableSources() {
         });
         
         updatePriorityBadges();
+        if (typeof checkYouTubeLoginStatus === 'function') checkYouTubeLoginStatus();
         console.log(`✅ Loaded ${searchableSources.length} searchable sources`);
         
     } catch (error) {
@@ -119,10 +122,14 @@ function createSourcePriorityItem(source, index) {
         fields.className = 'source-fields';
         fields.innerHTML = `
             <div class="form-group">
-                <label for="youtubeCookies">YouTube cookies.txt (optional)</label>
-                <textarea id="youtubeCookies" rows="6" spellcheck="false"
-                    placeholder="Paste Netscape-format cookies.txt from a signed-in browser"></textarea>
-                <small>Click the source name to show this field. Cookies are stored as a secret and never displayed back. Export with: yt-dlp --cookies-from-browser firefox --cookies cookies.txt</small>
+                <label>YouTube session (optional)</label>
+                <div class="youtube-login-row">
+                    <button type="button" class="btn btn-sm youtube-login-btn" onclick="startYouTubeLogin()">Login with YouTube</button>
+                    <span class="youtube-login-status">Checking login status…</span>
+                </div>
+                <textarea class="youtube-cookies-field" rows="5" spellcheck="false"
+                    placeholder="Or paste Netscape-format cookies.txt from a signed-in browser"></textarea>
+                <small>Login is handled in an embedded browser when the optional youtube-login profile is enabled. Cookies are stored as a secret and never displayed back.</small>
             </div>
         `;
         div.appendChild(fields);

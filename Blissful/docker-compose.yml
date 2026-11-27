@@ -61,6 +61,9 @@ services:
       # local path into yt-dlp.conf when using the published image.
       # - DENO_PATH=/app/downloads/deno
       - POT_PROVIDER_URL=http://blissful-pot:4416
+      # Optional interactive login sidecar (compose --profile youtube-login)
+      - SELENIUM_URL=http://youtube-login:4444
+      - YOUTUBE_NOVNC_PORT=7900
 
       # Optional: Lidarr connection (can also be set in the web UI)
       # - LIDARR_URL=http://lidarr:8686
@@ -104,6 +107,26 @@ services:
       - blissful-network
     restart: unless-stopped
     # Intentionally no `ports:` - only reachable from the compose network.
+
+  # Optional interactive browser for YouTube sign-in.
+  # Start with: docker compose --profile youtube-login up -d youtube-login
+  # The Chrome profile is persisted so you only need to sign in once.
+  youtube-login:
+    image: selenium/standalone-chrome:4.54.0-20261124
+    container_name: blissful-youtube-login
+    profiles: ["youtube-login"]
+    shm_size: 2gb
+    environment:
+      - SE_VNC_NO_PASSWORD=***      - SE_NODE_MAX_SESSIONS=1
+      - SE_SCREEN_WIDTH=1280
+      - SE_SCREEN_HEIGHT=900
+    volumes:
+      - ./youtube-login-profile:/home/seluser/.config/google-chrome
+    ports:
+      - "7900:7900"
+    networks:
+      - blissful-network
+    restart: unless-stopped
 
 # Optional: Add Lidarr service if not already running
 # Uncomment below if you want to run Lidarr in Docker too

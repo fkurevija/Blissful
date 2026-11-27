@@ -242,24 +242,23 @@ Control which sources are tried first:
 
 Metadata providers never serve audio. Each has its own toggle under
 **Sources → Metadata Providers** and is off by default. Drag the rows to
-reorder them: the **first enabled provider that resolves a track wins**, so
-put your most trusted source at the top. Click a provider row to expand its
-credential fields; MusicBrainz has none. AcoustID only verifies audio after
-download, so its position in the list has no effect on query refinement.
+reorder them; click a provider row to expand its credential fields (MusicBrainz
+has none). **Metadata providers no longer rewrite pre-download search
+queries** — enriched queries returned zero candidates on the live feeds.
+Search queries always use the artist/title/album from Lidarr.
 
 | Provider | What it does | Credentials |
 | --- | --- | --- |
-| Spotify | Refines the pre-download query with artist/title/album/year. | Client ID + secret |
-| Discogs | Looks up the release in the Discogs database and adds its year/edition to the query. | Personal access token, or consumer key + secret |
+| Spotify | Reserved for enriching tags on downloaded files; not used for search. | Client ID + secret |
+| Discogs | Reserved for enriching tags on downloaded files; not used for search. | Personal access token, or consumer key + secret |
 | AcoustID | After download, fingerprints the file with Chromaprint (`fpcalc`) and rejects it when the identified recording does not match. | Application key (`client`); user key required from 1 Jan 2027 |
-| MusicBrainz | Resolves the exact recording, release and year to refine the query. No account needed. | None (identifying User-Agent required; 1 request/second) |
+| MusicBrainz | Reserved for enriching tags on downloaded files; not used for search. | None (identifying User-Agent required; 1 request/second) |
 
 > **AcoustID has no text search.** Its API only looks up audio fingerprints, so
 > it cannot refine a query before a file exists. With its checkbox enabled,
 > Blissful fingerprints each otherwise-accepted candidate; a low score or a
 > mismatched artist/title deletes that candidate and the next source is tried.
-> Artwork-only differences are ignored. Spotify, Discogs and MusicBrainz are
-> the providers that refine the search query.
+> Artwork-only differences are ignored.
 
 - `fpcalc` comes from `libchromaprint-tools`, baked into the published image.
   For local installs, install that package or set `acoustid_fpcalc_path`.
@@ -273,6 +272,33 @@ download, so its position in the list has no effect on query refinement.
   secrets are masked in `/api/config`.
 - Providers are independent and optional: enable only the ones you have keys for.
 - `metadata_provider_order` stores the dragged order and is saved automatically.
+
+### YouTube sign-in (optional)
+
+YouTube's bot gate expects session cookies from a real signed-in browser. An
+OAuth form cannot provide them, so Blissful can run an optional browser
+sidecar and let you sign in from inside the UI:
+
+```
+docker compose --profile youtube-login up -d youtube-login
+```
+
+This starts a Chrome container with a persistent profile and exposes noVNC on
+port **7900**. Click the YouTube or YouTube Music row under **Sources →
+Download Sources**, then **Login with YouTube** — a window opens where you
+sign in normally (2FA included). Click **Save cookies** when done; Blissful
+reads the YouTube cookies from that browser and stores them in the masked
+`youtube_cookies` setting. The profile persists, so you only sign in again
+when YouTube expires the session — Blissful marks the field as "Session
+expired - login again" when a download is rejected with a bot challenge.
+
+The sidecar image is roughly 400–600 MB on disk and uses 300–800 MB RAM while
+running. It is not started by default. You can still paste a Netscape
+`cookies.txt` into the expanded row manually, or set `YOUTUBE_COOKIES`.
+
+Use a dedicated Google account. The exported cookies include YouTube session
+cookies and should be treated as secrets.
+
 
 ### **Search Depth**
 
