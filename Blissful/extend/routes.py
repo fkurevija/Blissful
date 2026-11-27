@@ -236,6 +236,8 @@ def register_routes(app, config_manager, lidarr_client, download_manager,
         job, changed = job_manager.retry(job_id)
         if job is None:
             return jsonify({'success': False, 'error': 'Job not found'}), 404
+        if wanted_search and job and job.get('kind') in ('search', 'cleanup'):
+            wanted_search.wake_retry_dispatcher()
         return jsonify({'success': True, 'job': job, 'restarted': changed})
 
     @app.route('/api/jobs/<job_id>/cancel', methods=['POST'])

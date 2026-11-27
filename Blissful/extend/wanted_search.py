@@ -221,6 +221,7 @@ class WantedSearchService:
         # Set by cancel_active() to stop an in-flight search/cleanup run.
 
         self._cancel_event = threading.Event()
+        self._retry_wake = threading.Event()
 
         # Job ids belonging to the current run, so cancel_active() only
         # cancels this run's jobs and not an unrelated new job.
@@ -325,6 +326,7 @@ class WantedSearchService:
                 status = 'cancelled' if self._cancel_event.is_set() else 'completed'
 
                 self._finish_active(status)
+                self._retry_wake.set()
 
             self._run_lock.release()
 
@@ -359,6 +361,7 @@ class WantedSearchService:
                 status = 'cancelled' if self._cancel_event.is_set() else 'failed'
 
                 self._finish_active(status)
+                self._retry_wake.set()
 
             self._run_lock.release()
 
@@ -2170,6 +2173,13 @@ class WantedSearchService:
 
 
 
+    def wake_retry_dispatcher(self):
+
+        """Wake the scheduler so queued top-level retries start now."""
+
+        self._retry_wake.set()
+
+
     def _process_due_retries(self):
 
         """Start one due top-level search/cleanup retry, if no run is active."""
@@ -2320,7 +2330,11 @@ class WantedSearchService:
 
         def loop():
 
-            while not stop_event.wait(poll):
+            while not stop_event.is_set():
+
+                self._retry_wake.wait(poll)
+
+                self._retry_wake.clear()
 
                 try:
 

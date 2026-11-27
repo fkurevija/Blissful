@@ -270,3 +270,18 @@ def test_manual_retry_is_picked_before_newer_pending_jobs(tmp_path):
     picked = manager._next_pending()
     assert picked['id'] == old['id']
     assert (picked.get('log') or [])[-1]['phase'] == 'retry requested'
+
+
+def test_retry_wakes_dispatcher_for_top_level_runs(tmp_path):
+    manager = make_manager(tmp_path)
+    job, _ = manager.enqueue('cleanup', {'mode': 'stale-cleanup', 'apply': True})
+    manager.update_job(job['id'], status='failed', failure_reason='boom')
+    manager.retry(job['id'])
+    service = WantedSearchService(ConfigStub(), object, job_manager=manager)
+    service.wake_retry_dispatcher()
+    assert service._retry_wake.is_set()
+    service._retry_wake.clear()
+    called = {}
+    service.cleanup_stale = lambda **kwargs: called.update(kwargs)
+    service._process_due_retries()
+    assert called['retry_job_id'] == job['id']
