@@ -19,6 +19,8 @@ jobs can be processed in parallel; each job has its own progress snapshot,
 so one run cannot erase another run's current source or download attempts.
 Failed tracks appear in the Downloads tab's Failed tracks list and can be
 retried one at a time. The details pane has a Jump to last button for long logs.
+On mobile, tap the progress toast to shrink it to a small rounded square so it
+does not cover the log; tap the square to expand it again.
 When Lidarr already has every track, cleanup removes the stuck queue row
 instead of reporting "no missing tracks" and leaving the torrent there.
 Progress from a child download job is written to the run that owns it,

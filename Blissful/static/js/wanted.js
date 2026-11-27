@@ -92,6 +92,32 @@ function wantedToast(id, message, type) {
                 cancel.disabled = true;
             }
         });
+        el.tabIndex = 0;
+        el.title = 'Tap to collapse or expand';
+        const isMobile = () => !window.matchMedia
+            || window.matchMedia('(max-width: 768px)').matches;
+        const toggleCollapsed = () => {
+            if (!isMobile()) return;
+            el.classList.toggle('wanted-toast-collapsed');
+        };
+        el.addEventListener('click', event => {
+            if (event.target.closest('button')) return;
+            toggleCollapsed();
+        });
+        el.addEventListener('keydown', event => {
+            if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                toggleCollapsed();
+            }
+        });
+        if (window.matchMedia) {
+            const query = window.matchMedia('(max-width: 768px)');
+            const expandOnDesktop = change => {
+                if (!change.matches) el.classList.remove('wanted-toast-collapsed');
+            };
+            if (query.addEventListener) query.addEventListener('change', expandOnDesktop);
+            else if (query.addListener) query.addListener(expandOnDesktop);
+        }
         document.body.appendChild(el);
     }
     el.dataset.type = type || 'info';

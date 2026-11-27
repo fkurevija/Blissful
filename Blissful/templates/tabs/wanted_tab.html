@@ -83,5 +83,13 @@
 .wanted-toast-dot { width: 10px; height: 10px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.5); border-top-color: #fff; animation: wanted-spin 0.8s linear infinite; flex: none; }
 .wanted-toast[data-type="success"] .wanted-toast-dot,
 .wanted-toast[data-type="error"] .wanted-toast-dot { border: none; background: #fff; animation: none; }
+.wanted-toast { cursor: pointer; }
+.wanted-toast-collapsed { width: 44px; min-width: 44px; max-width: 44px; height: 44px; padding: 0; border-radius: 12px; gap: 0; justify-content: center; overflow: hidden; }
+.wanted-toast-collapsed .wanted-toast-text,
+.wanted-toast-collapsed button { display: none !important; }
+.wanted-toast-collapsed .wanted-toast-dot { width: 14px; height: 14px; }
+@media (max-width: 768px) {
+    .wanted-toast { right: 12px; bottom: 12px; max-width: calc(100vw - 24px); }
+}
 @keyframes wanted-spin { to { transform: rotate(360deg); } }
 </style>

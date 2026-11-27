@@ -73,6 +73,7 @@ Blissful is a Flask microservice that fills missing tracks in a Lidarr library b
 - ⚙️ **Concurrent Runs** - Two download workers; a wanted search and a stale cleanup can run at the same time
 - 🎯 **Per-Track Retry** - Failed tracks are listed on the Downloads tab and can be retried individually
 - ⏬ **Jump to Last** - Details-pane button scrolls straight to the newest log entry
+- 📱 **Compact Toast** - On mobile, tap the job toast to shrink it to a rounded square and tap again to expand
 - 🔐 **Optional API Security** - Bearer-token auth and restricted CORS for exposing Blissful beyond a trusted LAN
 
 ---
