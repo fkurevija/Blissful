@@ -117,11 +117,10 @@ services:
     profiles: ["youtube-login"]
     shm_size: 2gb
     environment:
-      - SE_VNC_NO_PASSWORD=***      - SE_NODE_MAX_SESSIONS=1
+      - SE_VNC_NO_PASSWORD=***
+      - SE_NODE_MAX_SESSIONS=1
       - SE_SCREEN_WIDTH=1280
       - SE_SCREEN_HEIGHT=900
-    volumes:
-      - ./youtube-login-profile:/home/seluser/.config/google-chrome
     ports:
       - "7900:7900"
     networks:

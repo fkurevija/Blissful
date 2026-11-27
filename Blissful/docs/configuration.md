@@ -288,8 +288,8 @@ port **7900**. Click the YouTube or YouTube Music row under **Sources →
 Download Sources**, then **Login with YouTube** — a window opens where you
 sign in normally (2FA included). Click **Save cookies** when done; Blissful
 reads the YouTube cookies from that browser and stores them in the masked
-`youtube_cookies` setting. The profile persists, so you only sign in again
-when YouTube expires the session — Blissful marks the field as "Session
+`youtube_cookies` setting. You only need to sign in again when YouTube expires
+those cookies — Blissful marks the field as "Session
 expired - login again" when a download is rejected with a bot challenge.
 
 The sidecar image is roughly 400–600 MB on disk and uses 300–800 MB RAM while

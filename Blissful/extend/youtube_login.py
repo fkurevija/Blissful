@@ -134,7 +134,8 @@ class YouTubeLoginService:
                 options.add_argument('--no-sandbox')
                 options.add_argument('--disable-dev-shm-usage')
                 options.add_argument('--disable-gpu')
-                options.add_argument(f'--user-data-dir={self.profile_dir}')
+                # No persistent Chrome profile: cookies are exported to
+                # Blissful's config on finish and reused by yt-dlp.
                 options.add_argument('--window-size=1280,900')
                 try:
                     _DRIVER = webdriver.Remote(
