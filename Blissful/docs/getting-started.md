@@ -302,7 +302,9 @@ python Blissful.py --retry-failed-imports --apply      # download + import
 python Blissful.py --wanted-search --json-only         # pure JSON for automation
 ```
 
-State files under `/app/downloads` prevent re-sending the same albums.
+Wanted search and stale cleanup keep no separate state file — Lidarr's queue
+and track files are authoritative. Failed-import recovery still uses its own
+state file under `/app/downloads`.
 
 ## 🐛 Troubleshooting
 

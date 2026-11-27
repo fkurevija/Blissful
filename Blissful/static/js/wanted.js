@@ -439,15 +439,6 @@ async function runStaleCleanup() {
     }
 }
 
-async function resetWantedState() {
-    try {
-        await wantedApi('/api/wanted/reset', { method: 'POST', body: '{}' });
-        showNotification('Wanted search state reset', 'success');
-    } catch (error) {
-        showNotification(`Reset failed: ${error.message}`, 'error');
-    }
-}
-
 document.addEventListener('DOMContentLoaded', () => {
     const wire = (id, handler) => {
         const el = document.getElementById(id);
@@ -465,7 +456,6 @@ document.addEventListener('DOMContentLoaded', () => {
         document.querySelectorAll('#staleList input[type="checkbox"]').forEach(c => { c.checked = true; });
     });
     wire('cleanupStale', runStaleCleanup);
-    wire('resetWantedState', resetWantedState);
     loadWantedSettings();
     setInterval(watchWantedBusy, 5000);
 });

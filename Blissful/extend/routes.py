@@ -536,13 +536,6 @@ def register_routes(app, config_manager, lidarr_client, download_manager,
                               if wanted_search else None),
         })
 
-    @app.route('/api/wanted/reset', methods=['POST'])
-    def reset_wanted_state():
-        if not wanted_search:
-            return jsonify({'success': False, 'error': 'Wanted search unavailable'}), 404
-        wanted_search.reset_state()
-        return jsonify({'success': True, 'message': 'Wanted search state cleared'})
-
     # ==================== SOURCES ROUTES ====================
     
     @app.route('/api/supported-sources', methods=['GET'])

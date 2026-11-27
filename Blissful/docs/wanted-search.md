@@ -86,14 +86,14 @@ with checkboxes.
 
 With *Apply* checked, for each selected stale item Blissful:
 
-1. Reads the album's tracks and skips it if nothing is missing or it was already
-   handled (state file).
+1. Reads the album's tracks and skips it if nothing is missing; Lidarr's queue
+   and track files are the only source of truth.
 2. Queues `AlbumSearch` for that album and waits for the Lidarr command.
 3. Polls the album's tracks until every track has `hasFile: true`, bounded by the
    configured wait.
 4. Only then deletes the original queue entry with `deleteFiles=false` and
-   `addImportExclusion=false`, and records the album in state so it is never
-   re-searched.
+   `addImportExclusion=false`. Nothing is remembered separately, so a genuinely
+   new stale torrent for the same album is still processed.
 
 If the gap-fill or import does not complete, the queue entry is **kept** with
 the reported reason and the run continues to the next album. Nothing is deleted
@@ -117,8 +117,5 @@ python Blissful.py --wanted-search --json-only    # pure JSON report for automat
 
 Logs go to stderr and are suppressed automatically when stdout is piped; use
 `--json-only` to force this even when attached to a terminal.
-
-State lives in `/app/downloads/wanted-search-state.json`; use the **Reset state**
-button to clear it after you have manually resolved an album.
 
 **Back to:** [Documentation Home](#!/documentation?doc=README)

@@ -803,9 +803,10 @@ def test_stale_cleanup_deletes_only_after_import(tmp_path, monkeypatch):
     assert not any(c[0] == 'search' for c in calls)
     assert calls[-1][0] == 'delete' and calls[-1][1] == 11
 
+    # No state memo: the same album is eligible again if Lidarr still lists it.
     again = svc.cleanup_stale(apply=True, wait_minutes=1)
-    assert again['counts']['deleted'] == 0
-    assert any('already recorded' in str(s) for s in again['skipped'])
+    assert again['counts']['deleted'] == 1
+    assert calls.count(('gapfill', 10, True, 'stale-cleanup')) == 2
 
 
 def test_get_stale_resolves_album_metadata_from_lidarr(tmp_path):

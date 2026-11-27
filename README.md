@@ -317,7 +317,7 @@ GET /api/health
 | `POST /api/wanted/search` | `{ "mode": "all"|"selected", "album_ids": [], "apply": false }` — dry-run by default |
 | `POST /api/stale-torrents/cleanup` | `{ "record_ids": [], "apply": false }` — deletes queue entries only after import is confirmed |
 | `GET /api/jobs` / `POST /api/jobs/<id>/retry` | Inspect and retry queued album downloads |
-| `GET /api/wanted/status` / `POST /api/wanted/reset` | Feature flags and state reset |
+| `GET /api/wanted/status` | Feature flags and active run status |
 
 For CLI automation use `--json-only` (or pipe the command): logs are suppressed
 so the combined output is a single JSON report.

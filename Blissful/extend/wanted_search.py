@@ -14,11 +14,9 @@ Wanted/Missing, or qBittorrent directly), optionally re-searches their albums
 
 and removes the queue items *only after* the missing tracks are confirmed
 
-imported.  A JSON state
+imported.  Lidarr's own queue and track files are the only source of truth;
 
-file records handled albums/queue items so a stale torrent is never cleaned
-
-twice.
+no separate state file is kept.
 
 
 
@@ -28,7 +26,7 @@ Public interface::
 
     WantedSearchService(config_manager, lidarr_client_class,
 
-                        state_path='/app/downloads/wanted-search-state.json')
+                        state_path=None)  # legacy, unused
 
 
 
@@ -43,8 +41,6 @@ Public interface::
     service.run_scheduled(apply=True)
 
     service.start_scheduler(poll_seconds=30) / service.stop_scheduler()
-
-    service.reset_state()
 
 """
 
@@ -189,7 +185,7 @@ class WantedSearchService:
 
     def __init__(self, config_manager, lidarr_client_class,
 
-                 state_path='/app/downloads/wanted-search-state.json',
+                 state_path=None,  # legacy, unused
 
                  gapfill=None, job_manager=None):
 
@@ -197,7 +193,7 @@ class WantedSearchService:
 
         self.lidarr_client_class = lidarr_client_class
 
-        self.state_path = Path(state_path)
+        self.state_path = Path(state_path) if state_path else None
 
         self.gapfill = gapfill
 
@@ -222,7 +218,6 @@ class WantedSearchService:
         self._run_job_ids_by_kind = {'search': set(), 'cleanup': set()}
         self._local = threading.local()
         self._last_kind = None
-        self._state_lock = threading.Lock()
         self._retry_wake = threading.Event()
 
     # ------------------------------------------------------------ gap fill
@@ -317,7 +312,7 @@ class WantedSearchService:
         return False
 
     def _remove_stale_queue_records(self, client, records, report,
-                                    albums_state, album_id, title):
+                                    album_id, title):
         """Delete stale Lidarr queue rows after import is confirmed."""
         self._set_active(phase='removing stale queue entry',
                          imported=len(report['imported']))
@@ -334,12 +329,6 @@ class WantedSearchService:
                 report['kept'].append(record_id)
                 continue
             report['deleted'].append(record_id)
-            albums_state[str(record_id)] = {
-                'timestamp': time.strftime('%Y-%m-%dT%H:%M:%S'),
-                'album': album_id,
-                'title': title,
-                'status': 'deleted',
-            }
         self._set_active(deleted=len(report['deleted']),
                          kept=len(report['kept']),
                          errors=len(report['errors']),
@@ -620,79 +609,7 @@ class WantedSearchService:
 
 
 
-    # ------------------------------------------------------------------- state
-
-    def _load_state(self):
-
-        try:
-
-            if self.state_path.exists():
-
-                data = json.loads(self.state_path.read_text(encoding='utf-8'))
-
-                if isinstance(data, dict):
-
-                    albums = data.get('albums')
-
-                    last_run = data.get('last_run')
-
-                    data['albums'] = albums if isinstance(albums, dict) else {}
-
-                    data['last_run'] = last_run if isinstance(last_run, dict) else {}
-
-                    return data
-
-        except Exception:
-
-            pass
-
-        return {'albums': {}, 'last_run': {}}
-
-
-
-    def _save_state(self, state):
-        try:
-            # Two runs can finish at once: merge into the latest on-disk state.
-            with self._state_lock:
-                disk = self._load_state()
-                merged = dict(disk)
-                albums = dict(disk.get('albums') or {})
-                albums.update(state.get('albums') or {})
-                merged['albums'] = albums
-                if state.get('last_run'):
-                    merged['last_run'] = state['last_run']
-                self.state_path.parent.mkdir(parents=True, exist_ok=True)
-                tmp = self.state_path.with_name(self.state_path.name + '.tmp')
-                tmp.write_text(json.dumps(merged, indent=2), encoding='utf-8')
-                tmp.replace(self.state_path)
-        except Exception:
-
-            # A state write failure must not turn a successful run into an error.
-
-            pass
-
-
-
-    def reset_state(self):
-
-        """Delete the state file so every album is eligible again."""
-
-        try:
-
-            if self.state_path.exists():
-
-                self.state_path.unlink()
-
-        except OSError:
-
-            pass
-
-        self._last_scheduled = 0.0
-
-        return True
-
-
-
+    # -------------------------------------------------------------- pagination
     # -------------------------------------------------------------- pagination
 
     @staticmethod
@@ -1773,18 +1690,6 @@ class WantedSearchService:
 
                          imported=0, deleted=0, kept=0, skipped=0, errors=0)
 
-        state = self._load_state()
-
-        albums_state = state.get('albums')
-
-        if not isinstance(albums_state, dict):
-
-            albums_state = {}
-
-            state['albums'] = albums_state
-
-
-
         stale = self.get_stale()
 
         if record_ids is not None:
@@ -1798,22 +1703,6 @@ class WantedSearchService:
         report['scanned'] = list(stale)
 
         self._set_active(phase='searching', scanned=len(stale))
-
-
-
-        def already_recorded(album_id):
-
-            if str(album_id) in albums_state:
-
-                return True
-
-            for entry in albums_state.values():
-
-                if isinstance(entry, dict) and entry.get('album') is not None and str(entry.get('album')) == str(album_id):
-
-                    return True
-
-            return False
 
 
 
@@ -1894,14 +1783,6 @@ class WantedSearchService:
 
             try:
 
-                if already_recorded(album_id):
-
-                    report['skipped'].append({'album': album_id,
-
-                                              'reason': 'already recorded in state'})
-
-                    continue
-
                 if self._recently_imported_album(album_id):
 
                     report['skipped'].append({'album': album_id,
@@ -1919,7 +1800,7 @@ class WantedSearchService:
                                               'already_imported': True})
 
                     self._remove_stale_queue_records(
-                        client, records, report, albums_state, album_id, title)
+                        client, records, report, album_id, title)
 
                     continue
 
@@ -1935,7 +1816,7 @@ class WantedSearchService:
                     })
                     if apply:
                         self._remove_stale_queue_records(
-                            client, records, report, albums_state, album_id, title)
+                            client, records, report, album_id, title)
                     continue
 
 
@@ -2138,19 +2019,10 @@ class WantedSearchService:
 
                 })
 
-                # Record the album as imported before touching the queue so a
-                # failed delete or crash cannot make the next run grab it again.
-                albums_state[str(album_id)] = {
-                    'timestamp': time.strftime('%Y-%m-%dT%H:%M:%S'),
-                    'album': album_id,
-                    'title': title,
-                    'status': 'imported',
-                }
-
                 progress_state['done_before'] += gap.get('imported') or 0
 
                 self._remove_stale_queue_records(
-                    client, records, report, albums_state, album_id, title)
+                    client, records, report, album_id, title)
 
             except Exception as exc:
 
@@ -2163,10 +2035,6 @@ class WantedSearchService:
                                           'reason': 'unexpected error'})
 
 
-
-        if apply and report['deleted']:
-
-            self._save_state(state)
 
         report['counts'] = {key: len(report[key]) for key in
 
@@ -2300,26 +2168,6 @@ class WantedSearchService:
 
     # ---------------------------------------------------------------- scheduler
 
-    def _last_run_timestamp(self):
-
-        last_run = self._load_state().get('last_run') or {}
-
-        stamp = last_run.get('timestamp') if isinstance(last_run, dict) else None
-
-        if stamp:
-
-            try:
-
-                return time.mktime(time.strptime(str(stamp), '%Y-%m-%dT%H:%M:%S'))
-
-            except (TypeError, ValueError):
-
-                pass
-
-        return 0.0
-
-
-
     def _interval_hours(self):
 
         try:
@@ -2354,9 +2202,7 @@ class WantedSearchService:
 
         stop_event.clear()
 
-        self._last_scheduled = max(self._last_scheduled,
-
-                                   self._last_run_timestamp())
+        self._last_scheduled = max(self._last_scheduled, time.time())
 
 
 
@@ -2430,7 +2276,7 @@ class WantedSearchService:
 
     def run_scheduled(self, apply=True) -> dict:
 
-        """Run stale cleanup and record ``last_run`` metadata in state."""
+        """Run stale cleanup and return a summary of this invocation."""
 
         if self._config().get('stale_cleanup_enabled') is False:
 
@@ -2450,9 +2296,7 @@ class WantedSearchService:
 
             return report
 
-        state = self._load_state()
-
-        state['last_run'] = {
+        report['last_run'] = {
 
             'timestamp': time.strftime('%Y-%m-%dT%H:%M:%S'),
 
@@ -2473,10 +2317,6 @@ class WantedSearchService:
             'errors': len(report.get('errors') or []),
 
         }
-
-        self._save_state(state)
-
-        report['last_run'] = state['last_run']
 
         return report
 
