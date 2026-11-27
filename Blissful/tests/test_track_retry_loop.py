@@ -213,7 +213,7 @@ def test_cancel_stamps_finished_at_and_retry_clears_stale_fields(tmp_path):
     assert retried['status'] == 'pending'
     assert 'finished_at' not in retried
     assert 'result' not in retried
-    assert retried['next_attempt_at'] <= time.time()
+    assert 'next_attempt_at' not in retried
 
 
 def test_cancelled_run_finishes_cancelled_not_failed(tmp_path):

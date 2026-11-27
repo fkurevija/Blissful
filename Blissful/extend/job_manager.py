@@ -191,7 +191,9 @@ class JobManager:
                     job['failure_reason'] = None
                     job['updated_at'] = _now()
                     job['attempts'] = int(job.get('attempts', 0)) + 1
-                    job['next_attempt_at'] = time.time()
+                    # Manual retry is due now: no timestamp means the UI
+                    # shows plain 'pending' and the worker picks it up.
+                    job.pop('next_attempt_at', None)
                     job.pop('finished_at', None)
                     job.pop('result', None)
                     job.pop('progress', None)
