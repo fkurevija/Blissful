@@ -1089,6 +1089,18 @@ class WantedSearchService:
 
 
 
+    def _finish_job(self, job_id, job_progress, success, failed, reason, result):
+        """Write a run's final status, letting user cancellation win."""
+        if self._cancel_event.is_set():
+            job_progress(status='cancelled', failure_reason='cancelled by user',
+                         result=result)
+        elif failed and job_id and self.job_manager is not None:
+            job_progress(result=result)
+            self.job_manager.schedule_retry(job_id, reason)
+        else:
+            job_progress(status='succeeded' if success else 'failed',
+                         failure_reason=reason, result=result)
+
     # ------------------------------------------------------------------ search
 
     def _search_impl(self, album_ids=None, apply=False, retry_job_id=None) -> dict:
@@ -1416,17 +1428,11 @@ class WantedSearchService:
 
         search_reason = None if report['success'] else report.get('error', '')
 
-        if search_job and not report['success'] and not self._cancel_event.is_set():
+        self._finish_job(search_job['id'] if search_job else None, job_progress,
 
-            job_progress(result=search_result)
+                         bool(report['success']), not bool(report['success']),
 
-            self.job_manager.schedule_retry(search_job['id'], search_reason)
-
-        else:
-
-            job_progress(status='succeeded' if report['success'] else 'failed',
-
-                         failure_reason=search_reason, result=search_result)
+                         search_reason, search_result)
 
         return report
 
@@ -2154,17 +2160,11 @@ class WantedSearchService:
 
                               'skipped': counts.get('skipped', 0)}
 
-            if report.get('errors') and not self._cancel_event.is_set():
+            self._finish_job(cleanup_job_id, job_progress,
 
-                job_progress(result=cleanup_result)
+                             not bool(report.get('errors')), bool(report.get('errors')),
 
-                self.job_manager.schedule_retry(cleanup_job_id, cleanup_reason)
-
-            else:
-
-                job_progress(status='succeeded' if not report.get('errors') else 'failed',
-
-                             failure_reason=cleanup_reason, result=cleanup_result)
+                             cleanup_reason, cleanup_result)
 
         return report
 

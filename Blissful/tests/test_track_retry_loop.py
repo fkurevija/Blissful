@@ -214,3 +214,45 @@ def test_cancel_stamps_finished_at_and_retry_clears_stale_fields(tmp_path):
     assert 'finished_at' not in retried
     assert 'result' not in retried
     assert retried['next_attempt_at'] <= time.time()
+
+
+def test_cancelled_run_finishes_cancelled_not_failed(tmp_path):
+    manager = make_manager(tmp_path)
+    job, _ = manager.enqueue('cleanup', {'mode': 'stale-cleanup', 'apply': True})
+    manager.update_job(job['id'], status='running')
+    service = WantedSearchService(ConfigStub(), object, job_manager=manager)
+    service._cancel_event.set()
+    changes = {}
+    service._finish_job(job['id'], lambda **kw: manager.update_job(job['id'], **kw),
+                        success=False, failed=True, reason='boom',
+                        result={'command': 'stale-cleanup'})
+    stored = manager.get_job(job['id'])
+    assert stored['status'] == 'cancelled'
+    assert stored['failure_reason'] == 'cancelled by user'
+
+
+def test_failed_run_schedules_retry_without_cancel(tmp_path):
+    manager = make_manager(tmp_path)
+    job, _ = manager.enqueue('cleanup', {'mode': 'stale-cleanup', 'apply': True})
+    manager.update_job(job['id'], status='running')
+    service = WantedSearchService(ConfigStub(), object, job_manager=manager)
+    changes = {}
+    service._finish_job(job['id'], lambda **kw: manager.update_job(job['id'], **kw),
+                        success=False, failed=True, reason='boom',
+                        result={'command': 'stale-cleanup'})
+    stored = manager.get_job(job['id'])
+    assert stored['status'] == 'pending'
+    assert stored['next_attempt_at'] > time.time()
+
+
+def test_succeeded_run_finishes_successful(tmp_path):
+    manager = make_manager(tmp_path)
+    job, _ = manager.enqueue('cleanup', {'mode': 'stale-cleanup', 'apply': True})
+    manager.update_job(job['id'], status='running')
+    service = WantedSearchService(ConfigStub(), object, job_manager=manager)
+    changes = {}
+    service._finish_job(job['id'], lambda **kw: manager.update_job(job['id'], **kw),
+                        success=True, failed=False, reason=None,
+                        result={'command': 'stale-cleanup'})
+    stored = manager.get_job(job['id'])
+    assert stored['status'] == 'succeeded'
