@@ -78,8 +78,14 @@ function wantedToast(id, message, type) {
         const cancel = el.querySelector('.wanted-toast-cancel');
         cancel.addEventListener('click', async () => {
             try {
-                await wantedApi('/api/wanted/cancel', { method: 'POST', body: '{}' });
+                const data = await wantedApi(
+                    '/api/wanted/cancel', { method: 'POST', body: '{}' });
                 cancel.disabled = true;
+                if (data && data.cancelled === false) {
+                    // No live run exists; the toast is stale, so close it.
+                    finishWantedToast('No active run to cancel', 'info', true);
+                    return;
+                }
                 const text = el.querySelector('.wanted-toast-text');
                 if (text) text.textContent = 'Cancelling…';
             } catch (e) {
@@ -115,6 +121,7 @@ function finishWantedToast(message, type, showLink) {
 async function pollWantedProgress(label) {
     const state = wantedToastState[WANTED_TOAST_ID] || { done: false };
     const started = Date.now();
+    let sawActive = false;
     while (!state.done) {
         await new Promise(resolve => setTimeout(resolve, 1500));
         if (state.done) break;
@@ -123,6 +130,19 @@ async function pollWantedProgress(label) {
         try {
             const status = await wantedApi('/api/wanted/status');
             const active = status.active;
+            if (!active && sawActive) {
+                // The run ended (or was cancelled) outside this tab. Close the
+                // sticky toast instead of polling stale progress forever.
+                state.done = true;
+                const last = status.last_activity || {};
+                const wasCancelled = last.cancel_requested === true
+                    || last.status === 'cancelled';
+                finishWantedToast(
+                    wasCancelled ? `${label} cancelled` : `${label} finished`,
+                    wasCancelled ? 'error' : 'success', true);
+                break;
+            }
+            if (active) sawActive = true;
             if (active && active.kind === 'cleanup') {
                 detail = active.phase || 'searching';
                 const parts = [];
