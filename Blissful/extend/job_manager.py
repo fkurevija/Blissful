@@ -199,6 +199,11 @@ class JobManager:
                     payload.pop('pending_tracks', None)
                     payload.pop('resume_state', None)
                     job['payload'] = payload
+                    # A manual retry should run next: enqueue() inserts at
+                    # the front, so restore that position here.
+                    self.jobs.remove(job)
+                    self.jobs.insert(0, job)
+                    self._append_log_locked(job, 'retry requested')
                     self._persist()
                     return dict(job), True
         return None, False
