@@ -78,7 +78,7 @@
 .result-box { white-space: pre-wrap; word-break: break-word; max-height: 220px; overflow: auto; background: var(--bg-secondary); padding: 10px; border-radius: 6px; }
 .form-row { display: flex; gap: 16px; flex-wrap: wrap; }
 .wanted-table { width: 100%; border-collapse: collapse; font-size: 13px; }
-.wanted-table th { cursor: pointer; user-select: none; text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); color: var(--muted-foreground); background: #1f2937; }
+.wanted-table th { position: sticky; top: 0; z-index: 2; cursor: pointer; user-select: none; text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); color: var(--muted-foreground); background: var(--card, #1f2937); }
 .wanted-table th:hover { color: var(--foreground); }
 .wanted-table td { padding: 5px 8px; border-bottom: 1px solid var(--border); }
 .wanted-table tr:last-child td { border-bottom: none; }
