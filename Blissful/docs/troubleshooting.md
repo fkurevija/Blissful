@@ -55,6 +55,23 @@ writes `yt-dlp.conf` with `--js-runtimes deno:<local path>` and
 
 ---
 
+## 🎞️ "Requested format is not available" on YouTube
+
+Logs showing `Signature solving failed` / `n challenge solving failed` followed
+by `Requested format is not available` mean Deno is installed but yt-dlp's
+**EJS challenge solver scripts** are missing. Images built from this repo ship
+`yt-dlp-ejs`; on an older image install it once into the persistent volume:
+
+```bash
+docker exec -u 0 blissful python3 -m pip install yt-dlp-ejs
+docker compose restart blissful
+```
+
+Alternatively add `--remote-components ejs:github` to `yt-dlp.conf` to fetch
+the scripts at runtime.
+
+---
+
 ## 🚨 Common Issues
 
 ### **Application Won't Start**

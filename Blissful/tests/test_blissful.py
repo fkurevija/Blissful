@@ -212,6 +212,29 @@ def test_job_queue_dedupe_and_retry(tmp_path):
     assert len(manager.list_jobs()) == 1
 
 
+def test_job_queue_dedupe_ignores_previous_process(tmp_path):
+    class Config:
+        def get_setting(self, key, default=None):
+            return default
+
+    class Albums:
+        def download_album(self, **kwargs):
+            return {'success': True}
+
+    path = str(tmp_path / 'jobs.json')
+    manager = JobManager(Config(), Albums(), path)
+    old, _ = manager.enqueue('album', {'artist': 'A', 'album': 'B', 'tracks': []})
+
+    # Simulate a job persisted by a previous process: no current instance id.
+    manager.jobs[0].pop('_instance_id')
+    manager._persist()
+    fresh = JobManager(Config(), Albums(), path)
+    new, dup = fresh.enqueue('album', {'artist': 'A', 'album': 'B', 'tracks': []})
+    assert dup is False
+    assert new['id'] != old['id']
+    assert len(fresh.list_jobs()) == 2
+
+
 def test_job_queue_cancel_pending_and_running(tmp_path):
     class Config:
         def get_setting(self, key, default=None):

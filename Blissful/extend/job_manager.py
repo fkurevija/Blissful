@@ -39,8 +39,11 @@ class JobManager:
         # (e.g. a long-running API search) are driven by their own service.
         self.managed_kinds = {'album'}
         # Jobs written by a previous process must never be revived or
-        # deduped into a new run - each run gets a fresh job id.
-        self._started_at = time.time()
+        # deduped into a new run - each run gets a fresh job id. An exact
+        # in-process marker is required here: comparing an ISO timestamp to
+        # time.time() loses a few microseconds to float rounding and makes
+        # dedupe fail intermittently.
+        self._instance_id = uuid.uuid4().hex
         self.jobs = self._load()
 
     # ------------------------------------------------------------------ persistence
@@ -79,17 +82,12 @@ class JobManager:
                     continue
                 # Only reuse a job created by this process; a restart
                 # must start a fresh job id rather than revive an orphan.
-                created = job.get('created_at') or ''
-                try:
-                    from datetime import datetime as _dt
-                    created_ts = _dt.fromisoformat(created).timestamp()
-                except Exception:
-                    created_ts = 0
-                if created_ts >= self._started_at:
+                if job.get('_instance_id') == self._instance_id:
                     return dict(job), True
 
             job = {
                 'id': uuid.uuid4().hex,
+                '_instance_id': self._instance_id,
                 'kind': kind,
                 'status': 'pending',
                 'dedupe_key': key,
