@@ -52,6 +52,18 @@ sections, text selection and scroll position survive polling. One toast manager
 owns every sticky notification, and all polls have tracked timers, in-flight
 guards and sequence ids so an older response cannot overwrite newer state.
 
+## Screenshots
+
+![Blissful UI overview](images/ui-overview.png)
+
+Useful follow-up captures for a release note: the Downloads tab with a Details
+pane open on a running job (live log plus grouped snapshot cards), the Wanted
+tab with a sticky progress toast on desktop and its collapsed mobile square,
+the Sources tab with reordered priorities, and the config validation message
+for a malformed `source_priorities` entry.
+
+---
+
 ## Verification
 
 The `Tests` workflow runs on every push and pull request:

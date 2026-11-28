@@ -1,9 +1,15 @@
 // Downloads tab: job queue and history.
 'use strict';
 
-let jobsAutoRefresh = null;
+const DlB = window.Blissful;
+const dlState = DlB.state;
+const dlScheduler = DlB.scheduler;
+
 let jobsSort = { key: 'updated_at', dir: 'desc' };
 let currentJobs = [];
+
+// Keyed DOM cache for the jobs table: one <tr> per job id, reused on polls.
+let jobsTableDom = null;
 
 function sortJobsBy(key) {
     if (jobsSort.key === key) {
@@ -11,7 +17,7 @@ function sortJobsBy(key) {
     } else {
         jobsSort = { key: key, dir: 'asc' };
     }
-    renderJobs(currentJobs);
+    renderJobs(dlState.get('jobs'));
 }
 
 function jobSortValue(job, key) {
@@ -91,147 +97,250 @@ function renderFailedTracks(jobs) {
     });
 }
 
-function renderJobs(jobs) {
-    const list = document.getElementById('jobsList');
-    const summary = document.getElementById('jobsSummary');
-    if (!list || !summary) return;
-    currentJobs = jobs || [];
-    const sorted = currentJobs.slice().sort((a, b) => {
-        const av = String(jobSortValue(a, jobsSort.key)).toLowerCase();
-        const bv = String(jobSortValue(b, jobsSort.key)).toLowerCase();
-        const result = av.localeCompare(bv);
-        return jobsSort.dir === 'asc' ? result : -result;
-    });
-    const counts = { pending: 0, running: 0, succeeded: 0, failed: 0 };
-    currentJobs.forEach(job => {
-        if (counts[job.status] !== undefined) counts[job.status] += 1;
-    });
-    summary.textContent = `Pending ${counts.pending} · Running ${counts.running} · Succeeded ${counts.succeeded} · Failed ${counts.failed}`;
-    renderFailedTracks(currentJobs);
-    list.innerHTML = '';
-    if (!currentJobs.length) {
-        list.innerHTML = '<div style="padding:12px"><em>No jobs yet.</em></div>';
-        return;
+function setCellText(cell, text) {
+    const value = text == null ? '' : String(text);
+    if (cell.textContent !== value) cell.textContent = value;
+}
+
+function jobsStatusText(job) {
+    let text = job.status || '';
+    if (job.status === 'pending' && job.next_attempt_at) {
+        const wait = Math.max(0, Math.ceil(job.next_attempt_at - Date.now() / 1000));
+        text += ` · retry ${wait}s`;
     }
+    return text;
+}
+
+function jobsLabelText(job) {
+    let text = jobLabel(job);
+    const tracks = (job.payload || {}).tracks || [];
+    if (tracks.length) text += ` (${tracks.length} track${tracks.length === 1 ? '' : 's'})`;
+    return text;
+}
+
+// Build the table shell once. Afterwards only cells are patched and rows are
+// moved, so focus, selection and scroll survive every poll.
+function ensureJobsDom(list) {
+    if (jobsTableDom && jobsTableDom.table.parentNode === list) return jobsTableDom;
+    list.innerHTML = '';
+    const empty = document.createElement('div');
+    empty.style.padding = '12px';
+    empty.innerHTML = '<em>No jobs yet.</em>';
+
     const table = document.createElement('table');
     table.className = 'jobs-table';
     const head = document.createElement('thead');
     const headRow = document.createElement('tr');
-    const columns = [
-        ['status', 'Status'], ['job', 'Job'], ['source', 'Source'],
-        ['updated', 'Updated']
-    ];
-    columns.forEach(([key, label]) => {
-        const th = document.createElement('th');
-        th.dataset.sortKey = key;
-        const arrow = jobsSort.key === key ? (jobsSort.dir === 'asc' ? ' ▲' : ' ▼') : '';
-        th.textContent = label ? label + arrow : '';
-        th.addEventListener('click', () => sortJobsBy(key));
-        headRow.appendChild(th);
-    });
+    [['status', 'Status'], ['job', 'Job'], ['source', 'Source'], ['updated', 'Updated']]
+        .forEach(([key, label]) => {
+            const th = document.createElement('th');
+            th.dataset.sortKey = key;
+            th._baseLabel = label;
+            th.addEventListener('click', () => sortJobsBy(key));
+            headRow.appendChild(th);
+        });
     const actionHead = document.createElement('th');
     actionHead.textContent = '';
     headRow.appendChild(actionHead);
     head.appendChild(headRow);
     table.appendChild(head);
     const body = document.createElement('tbody');
-    sorted.forEach(job => {
-        const row = document.createElement('tr');
-        const status = document.createElement('td');
-        status.className = 'job-status';
-        status.dataset.status = job.status;
-        status.textContent = job.status;
-        if (job.status === 'pending' && job.next_attempt_at) {
-            const wait = Math.max(0, Math.ceil(job.next_attempt_at - Date.now() / 1000));
-            status.textContent += ` · retry ${wait}s`;
-        }
-        row.appendChild(status);
-
-        const label = document.createElement('td');
-        label.textContent = jobLabel(job);
-        const tracks = (job.payload || {}).tracks || [];
-        if (tracks.length) label.textContent += ` (${tracks.length} track${tracks.length === 1 ? '' : 's'})`;
-        row.appendChild(label);
-
-        const source = document.createElement('td');
-        source.textContent = job.source || '';
-        row.appendChild(source);
-
-        const updated = document.createElement('td');
-        updated.textContent = job.updated_at ? String(job.updated_at).replace('T', ' ').slice(0, 19) : '';
-        row.appendChild(updated);
-
-        // Fixed three-slot grid: Details | Delete | Retry/Cancel.
-        // Unavailable actions are omitted, leaving an aligned blank column.
-        const actions = document.createElement('td');
-        actions.className = 'job-actions';
-        const makeAction = (text, extraClass, handler, column) => {
-            const button = document.createElement('button');
-            button.type = 'button';
-            button.className = 'btn btn-secondary job-action' + (extraClass ? ' ' + extraClass : '');
-            button.textContent = text;
-            button.style.gridColumn = String(column);
-            button.addEventListener('click', handler);
-            actions.appendChild(button);
-            return button;
-        };
-
-        const detailsBtn = makeAction('Details', 'job-details',
-            () => showJobDetails(job.id), 1);
-        detailsBtn.dataset.jobId = job.id;
-
-        if (job.status !== 'pending' && job.status !== 'running') {
-            makeAction('Delete', '', async () => {
-                try {
-                    const res = await fetch(`/api/jobs/${job.id}`, { method: 'DELETE' });
-                    const data = await res.json();
-                    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-                    loadJobs();
-                } catch (error) {
-                    showNotification(`Delete failed: ${error.message}`, 'error');
-                }
-            }, 2);
-        }
-
-        if (job.status === 'failed' || job.status === 'cancelled') {
-            makeAction('Retry', '', async () => {
-                try {
-                    const res = await fetch(`/api/jobs/${job.id}/retry`, { method: 'POST' });
-                    const data = await res.json();
-                    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-                    loadJobs();
-                } catch (error) {
-                    showNotification(`Retry failed: ${error.message}`, 'error');
-                }
-            }, 3);
-        } else if (job.status === 'pending' || job.status === 'running') {
-            makeAction('Cancel', '', async () => {
-                try {
-                    const res = await fetch(`/api/jobs/${job.id}/cancel`, { method: 'POST' });
-                    const data = await res.json();
-                    if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
-                    // Cancelling an in-flight job must stop the run that owns it.
-                    try { fetch('/api/wanted/cancel', { method: 'POST', body: '{}' }); } catch (e) {}
-                    loadJobs();
-                } catch (error) {
-                    showNotification(`Cancel failed: ${error.message}`, 'error');
-                }
-            }, 3);
-        }
-        row.appendChild(actions);
-        body.appendChild(row);
-    });
     table.appendChild(body);
+    list.appendChild(empty);
     list.appendChild(table);
+    jobsTableDom = {
+        table: table, tbody: body, empty: empty,
+        heads: Array.prototype.slice.call(headRow.children),
+        rows: new Map()
+    };
+    return jobsTableDom;
+}
+
+// Fixed three-slot grid: Details | Delete | Retry/Cancel. Unavailable actions
+// are omitted, leaving an aligned blank column (same markup as before).
+function renderJobActions(actions, job) {
+    actions.innerHTML = '';
+    const makeAction = (text, extraClass, handler, column) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'btn btn-secondary job-action' + (extraClass ? ' ' + extraClass : '');
+        button.textContent = text;
+        button.style.gridColumn = String(column);
+        button.addEventListener('click', handler);
+        actions.appendChild(button);
+        return button;
+    };
+
+    const detailsBtn = makeAction('Details', 'job-details', () => showJobDetails(job.id), 1);
+    detailsBtn.dataset.jobId = job.id;
+
+    if (job.status !== 'pending' && job.status !== 'running') {
+        makeAction('Delete', '', async () => {
+            try {
+                const res = await fetch(`/api/jobs/${job.id}`, { method: 'DELETE' });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+                loadJobs();
+            } catch (error) {
+                showNotification(`Delete failed: ${error.message}`, 'error');
+            }
+        }, 2);
+    }
+
+    if (job.status === 'failed' || job.status === 'cancelled') {
+        makeAction('Retry', '', async () => {
+            try {
+                const res = await fetch(`/api/jobs/${job.id}/retry`, { method: 'POST' });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+                loadJobs();
+            } catch (error) {
+                showNotification(`Retry failed: ${error.message}`, 'error');
+            }
+        }, 3);
+    } else if (job.status === 'pending' || job.status === 'running') {
+        makeAction('Cancel', '', async () => {
+            try {
+                const res = await fetch(`/api/jobs/${job.id}/cancel`, { method: 'POST' });
+                const data = await res.json();
+                if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+                // Cancelling an in-flight job must stop the run that owns it.
+                try { fetch('/api/wanted/cancel', { method: 'POST', body: '{}' }); } catch (e) {}
+                loadJobs();
+            } catch (error) {
+                showNotification(`Cancel failed: ${error.message}`, 'error');
+            }
+        }, 3);
+    }
+}
+
+function createJobRow(job) {
+    const row = document.createElement('tr');
+    row.dataset.jobId = String(job.id);
+    const status = document.createElement('td');
+    status.className = 'job-status';
+    const label = document.createElement('td');
+    const source = document.createElement('td');
+    const updated = document.createElement('td');
+    const actions = document.createElement('td');
+    actions.className = 'job-actions';
+    row.appendChild(status);
+    row.appendChild(label);
+    row.appendChild(source);
+    row.appendChild(updated);
+    row.appendChild(actions);
+    return { row: row, status: status, label: label, source: source,
+        updated: updated, actions: actions, statusKey: null };
+}
+
+function updateJobRow(entry, job) {
+    setCellText(entry.status, jobsStatusText(job));
+    if (entry.status.dataset.status !== job.status) entry.status.dataset.status = job.status;
+    setCellText(entry.label, jobsLabelText(job));
+    setCellText(entry.source, job.source || '');
+    setCellText(entry.updated,
+        job.updated_at ? String(job.updated_at).replace('T', ' ').slice(0, 19) : '');
+    // Action availability depends only on status: rebuild only on a transition
+    // so focused buttons stay focused across ordinary polls.
+    if (entry.statusKey !== job.status) {
+        entry.statusKey = job.status;
+        renderJobActions(entry.actions, job);
+    }
+}
+
+function renderJobs(jobs) {
+    const list = document.getElementById('jobsList');
+    const summary = document.getElementById('jobsSummary');
+    if (!list || !summary) return;
+    const next = jobs || [];
+    dlState.set('jobs', next, { source: 'api' });
+    currentJobs = next;
+
+    const sorted = next.slice().sort((a, b) => {
+        const av = String(jobSortValue(a, jobsSort.key)).toLowerCase();
+        const bv = String(jobSortValue(b, jobsSort.key)).toLowerCase();
+        const result = av.localeCompare(bv);
+        return jobsSort.dir === 'asc' ? result : -result;
+    });
+    const counts = { pending: 0, running: 0, succeeded: 0, failed: 0 };
+    next.forEach(job => {
+        if (counts[job.status] !== undefined) counts[job.status] += 1;
+    });
+    setCellText(summary,
+        `Pending ${counts.pending} · Running ${counts.running} · Succeeded ${counts.succeeded} · Failed ${counts.failed}`);
+    renderFailedTracks(next);
+
+    const dom = ensureJobsDom(list);
+    if (!next.length) {
+        dom.empty.style.display = '';
+        dom.table.style.display = 'none';
+        return;
+    }
+    dom.empty.style.display = 'none';
+    dom.table.style.display = '';
+
+    dom.heads.forEach(th => {
+        const key = th.dataset.sortKey;
+        if (!key) return;
+        const label = th._baseLabel +
+            (jobsSort.key === key ? (jobsSort.dir === 'asc' ? ' ▲' : ' ▼') : '');
+        if (th.textContent !== label) th.textContent = label;
+    });
+
+    const seen = new Set();
+    sorted.forEach(job => {
+        const id = String(job.id);
+        seen.add(id);
+        let entry = dom.rows.get(id);
+        if (!entry) {
+            entry = createJobRow(job);
+            dom.rows.set(id, entry);
+        }
+        updateJobRow(entry, job);
+    });
+
+    const desired = sorted.map(j => String(j.id)).join('\u0000');
+    const existing = Array.prototype.slice.call(dom.tbody.children)
+        .map(r => r.dataset.jobId).join('\u0000');
+    if (desired !== existing) {
+        sorted.forEach(job => dom.tbody.appendChild(dom.rows.get(String(job.id)).row));
+    }
+    dom.rows.forEach((entry, id) => {
+        if (!seen.has(id)) {
+            entry.row.remove();
+            dom.rows.delete(id);
+        }
+    });
 }
 
 let detailsPane = null;
-let detailsTimer = null;
 let detailsJobId = null;
 let detailsPlainText = '';
 let detailsMarkdown = '';
-let detailsFilter = { text: '', failuresOnly: false };
-let detailsOpenSet = new Set();  // indices of expanded Download Attempts sections
+const detailsFilter = dlState.get('details').filter;  // state-owned filter
+let detailsSelectionWired = false;
+
+// Keyed log-entry cache: log-entry key -> { el, sig }. Nodes are reused across
+// polls; expansion state lives in the details slice, not in DOM indices.
+let logNodes = new Map();
+
+function detailKeys() { return dlState.get('details').openKeys; }
+
+function setDetailOpen(key, open) {
+    const keys = detailKeys();
+    if (open) keys[key] = true;
+    else delete keys[key];
+    dlState.patch('details', { openKeys: keys }, { source: 'log' });
+}
+
+function logEntryKey(item, idx) {
+    return String(idx) + '|' + String((item && typeof item === 'object' && item.ts) || '');
+}
+
+function resetLogCache() {
+    logNodes = new Map();
+    if (detailsPane && detailsPane._logPane) detailsPane._logPane.innerHTML = '';
+}
 
 function escapeHtml(text) {
     if (text == null) return '';
@@ -301,9 +410,30 @@ function fallbackCopy(text, mark, button) {
 }
 
 function closeJobDetails() {
-    if (detailsTimer) { clearInterval(detailsTimer); detailsTimer = null; }
+    dlScheduler.stop('details');
     detailsJobId = null;
+    dlState.patch('details', { jobId: null, selectionPaused: false }, { source: 'details' });
     if (detailsPane) detailsPane.style.display = 'none';
+}
+
+// Explicit pause/resume while the user is selecting text in the details pane.
+function handleDetailsSelection() {
+    const pane = detailsPane;
+    if (!pane || pane.style.display === 'none' || pane.style.display === '') {
+        if (dlScheduler.isPaused('details')) dlScheduler.resume('details');
+        if (dlState.get('details').selectionPaused) {
+            dlState.patch('details', { selectionPaused: false }, { source: 'selection' });
+        }
+        return;
+    }
+    const sel = window.getSelection();
+    const selecting = !!(sel && !sel.isCollapsed && sel.toString() &&
+        sel.anchorNode && pane.contains(sel.anchorNode));
+    if (selecting) dlScheduler.pause('details');
+    else if (dlScheduler.isPaused('details')) dlScheduler.resume('details');
+    if (dlState.get('details').selectionPaused !== selecting) {
+        dlState.patch('details', { selectionPaused: selecting }, { source: 'selection' });
+    }
 }
 
 function providerOf(source) {
@@ -434,42 +564,51 @@ function renderJobDetails(job) {
     if (result.failed !== undefined) add('Failed', result.failed);
     if (result.total_tracks !== undefined) add('Total tracks', result.total_tracks);
 
-    body.innerHTML = '';
-    if (!fields.length && !log.length) {
-        body.innerHTML = '<em>No details recorded.</em>';
-    } else {
-        fields.forEach(f => {
-            const line = document.createElement('div');
-            line.className = 'job-detail-line';
-            line.innerHTML = `<strong>${escapeHtml(f.label)}:</strong> ${escapeHtml(f.text)}`;
-            body.appendChild(line);
-        });
-        if (failures.length) {
-            const head = document.createElement('div');
-            head.className = 'job-detail-line job-detail-heading';
-            head.textContent = `Per-track failures (${failures.length}):`;
-            body.appendChild(head);
-            failures.forEach(f => {
-                const attempts = Array.isArray(f.attempts)
-                    ? f.attempts.map(a => `${a.source || ''}: ${a.error || a.message || ''}`)
-                    : [];
+    // Keyed/signature-guarded fields: do not recreate Retry-track buttons on
+    // every poll, so focus and scroll inside the details body are preserved.
+    const bodySig = JSON.stringify({
+        fields: fields,
+        failures: failures.map(f => ({ title: f.title, error: f.error, attempts: f.attempts }))
+    });
+    if (body.dataset.sig !== bodySig) {
+        body.dataset.sig = bodySig;
+        body.innerHTML = '';
+        if (!fields.length && !log.length) {
+            body.innerHTML = '<em>No details recorded.</em>';
+        } else {
+            fields.forEach(f => {
                 const line = document.createElement('div');
                 line.className = 'job-detail-line';
-                line.textContent = `  - ${f.title || 'track'}: ${f.error || ''}`;
-                const retry = document.createElement('button');
-                retry.type = 'button';
-                retry.className = 'btn btn-sm';
-                retry.textContent = 'Retry track';
-                retry.addEventListener('click', () => retryJobTrack(job.id, f.title || 'track'));
-                line.appendChild(retry);
+                line.innerHTML = `<strong>${escapeHtml(f.label)}:</strong> ${escapeHtml(f.text)}`;
                 body.appendChild(line);
-                attempts.forEach(a => {
-                    const al = document.createElement('div');
-                    al.className = 'job-detail-line';
-                    al.textContent = `      ${a}`;
-                    body.appendChild(al);
-                });
             });
+            if (failures.length) {
+                const head = document.createElement('div');
+                head.className = 'job-detail-line job-detail-heading';
+                head.textContent = `Per-track failures (${failures.length}):`;
+                body.appendChild(head);
+                failures.forEach(f => {
+                    const attempts = Array.isArray(f.attempts)
+                        ? f.attempts.map(a => `${a.source || ''}: ${a.error || a.message || ''}`)
+                        : [];
+                    const line = document.createElement('div');
+                    line.className = 'job-detail-line';
+                    line.textContent = `  - ${f.title || 'track'}: ${f.error || ''}`;
+                    const retry = document.createElement('button');
+                    retry.type = 'button';
+                    retry.className = 'btn btn-sm';
+                    retry.textContent = 'Retry track';
+                    retry.addEventListener('click', () => retryJobTrack(job.id, f.title || 'track'));
+                    line.appendChild(retry);
+                    body.appendChild(line);
+                    attempts.forEach(a => {
+                        const al = document.createElement('div');
+                        al.className = 'job-detail-line';
+                        al.textContent = `      ${a}`;
+                        body.appendChild(al);
+                    });
+                });
+            }
         }
     }
 
@@ -557,9 +696,10 @@ function renderJobDetails(job) {
         return String(JSON.stringify(item)).toLowerCase().includes(detailsFilter.text);
     }
 
-    function buildEntry(item, renderedIdx) {
+    function buildEntry(item, key) {
         const entry = document.createElement('div');
         entry.className = 'job-log-entry';
+        entry.dataset.logKey = key;
         if (!item || typeof item !== 'object') {
             entry.textContent = String(item);
             return entry;
@@ -656,11 +796,12 @@ function renderJobDetails(job) {
                 details.appendChild(bullet(frag));
             });
             entry.appendChild(details);
-            details.dataset.idx = renderedIdx;
-            if (detailsOpenSet.has(renderedIdx)) details.open = true;
+            details.dataset.idx = key;
+            details.dataset.key = key;
+            // Expansion is keyed by log entry, not by positional index.
+            if (detailKeys()[key]) details.open = true;
             summary.addEventListener('click', () => {
-                if (details.open) detailsOpenSet.delete(renderedIdx);
-                else detailsOpenSet.add(renderedIdx);
+                setDetailOpen(key, !details.open);
             });
         }
         entry.dataset.plain = entryPlainText(item);
@@ -703,24 +844,70 @@ function renderJobDetails(job) {
         return lines.join('\n');
     }
 
+    // Keyed reconciliation: reuse one node per log entry so expansion, focus
+    // and scroll survive polls. Rebuild only entries whose content changed.
     function renderLogEntries() {
-        logPane.innerHTML = '';
-        let shown = 0;
-        let renderedIdx = 0;
-        log.forEach(item => {
+        const wanted = [];
+        log.forEach((item, idx) => {
             if (!entryMatchesFilter(item)) return;
-            logPane.appendChild(buildEntry(item, renderedIdx));
-            renderedIdx++;
-            shown++;
+            wanted.push({ item: item, idx: idx, key: logEntryKey(item, idx) });
         });
-        // Re-apply persisted open/collapsed state so expanding one section
-        // does not get reset when new log entries arrive on the next poll.
-        detailsOpenSet.forEach(idx => {
-            const el = logPane.children[idx];
-            if (el && el.querySelector('.log-attempts'))
-                el.querySelector('.log-attempts').open = true;
+        const seen = new Set();
+        wanted.forEach(({ item, idx, key }) => {
+            seen.add(key);
+            const sig = JSON.stringify(item) + '|' + idx;
+            let rec = logNodes.get(key);
+            if (!rec) {
+                rec = { el: buildEntry(item, key), sig: sig };
+                logNodes.set(key, rec);
+            } else if (rec.sig !== sig) {
+                const oldAttempts = rec.el.querySelector('.log-attempts');
+                const wasOpen = !!(oldAttempts && oldAttempts.open);
+                const hadFocus = rec.el.contains(document.activeElement);
+                const fresh = buildEntry(item, key);
+                rec.el.replaceWith(fresh);
+                rec.el = fresh;
+                rec.sig = sig;
+                const freshAttempts = fresh.querySelector('.log-attempts');
+                if (freshAttempts && wasOpen) freshAttempts.open = true;
+                if (hadFocus && typeof fresh.focus === 'function') {
+                    try { fresh.focus(); } catch (e) {}
+                }
+            }
         });
-        if (!shown) logPane.textContent = log.length ? '(no entries match the filter)' : '(waiting for log entries…)';
+
+        const placeholderText = wanted.length ? ''
+            : (log.length ? '(no entries match the filter)' : '(waiting for log entries…)');
+        let placeholder = logPane.querySelector('.log-empty');
+        if (placeholderText) {
+            if (!placeholder) {
+                placeholder = document.createElement('div');
+                placeholder.className = 'log-empty';
+                logPane.appendChild(placeholder);
+            }
+            placeholder.textContent = placeholderText;
+        } else if (placeholder) {
+            placeholder.remove();
+        }
+
+        const desired = wanted.map(w => w.key);
+        const existing = Array.prototype.slice.call(logPane.children)
+            .filter(el => el.dataset && el.dataset.logKey)
+            .map(el => el.dataset.logKey);
+        if (desired.join('\u0000') !== existing.join('\u0000')) {
+            wanted.forEach(w => logPane.appendChild(logNodes.get(w.key).el));
+        }
+        logNodes.forEach((rec, key) => {
+            if (!seen.has(key)) {
+                if (rec.el.parentNode === logPane) rec.el.remove();
+                logNodes.delete(key);
+            }
+        });
+        // Re-apply state-owned expansion after any rebuild or reorder.
+        logNodes.forEach((rec, key) => {
+            const attempts = rec.el.querySelector('.log-attempts');
+            if (attempts) attempts.open = !!detailKeys()[key];
+        });
         logPane.dataset.init = '1';
         if (wasAtBottom) logPane.scrollTop = logPane.scrollHeight;
     }
@@ -732,21 +919,27 @@ function renderJobDetails(job) {
         '- Source: ' + (job.source || '') + '\n' +
         (job.failure_reason ? '- Failure: ' + job.failure_reason + '\n' : '') +
         '\n## Log\n\n```\n' + detailsPlainText + '\n```';
+    dlState.patch('details', {
+        jobId: detailsJobId,
+        plainText: detailsPlainText,
+        markdown: detailsMarkdown
+    }, { source: 'job' });
     const badge = detailsPane.querySelector('.job-details-live');
     if (badge) badge.style.display = isLive ? 'inline' : 'none';
 }
 
 async function refreshJobDetails() {
-    if (!detailsJobId) return;
-    const sel = window.getSelection();
-    if (sel && sel.toString() && detailsPane && detailsPane.contains(sel.anchorNode)) return;
+    if (!detailsJobId || dlScheduler.isPaused('details')) return;
+    const token = dlScheduler.next('details');
     try {
         const res = await fetch('/api/jobs?limit=500');
         const data = await res.json();
+        // Drop stale responses: a newer details poll has already started.
+        if (!dlScheduler.isCurrent('details', token)) return;
         const job = (data.jobs || []).find(j => j.id === detailsJobId);
         if (job) renderJobDetails(job);
         const live = job && (job.status === 'pending' || job.status === 'running');
-        if (!live && detailsTimer) { clearInterval(detailsTimer); detailsTimer = null; }
+        if (!live) dlScheduler.stop('details');
     } catch (e) {}
 }
 
@@ -778,11 +971,19 @@ function showJobDetails(jobId) {
             if (e.key === 'Escape' && detailsPane && detailsPane.style.display === 'flex') closeJobDetails();
         });
     }
+    if (detailsJobId !== jobId) resetLogCache();
     detailsJobId = jobId;
-    renderJobDetails(currentJobs.find(j => j.id === jobId) || { id: jobId, status: 'pending' });
-    if (detailsTimer) clearInterval(detailsTimer);
-    detailsTimer = setInterval(refreshJobDetails, 1500);
+    dlState.patch('details', { jobId: jobId }, { source: 'details' });
+    renderJobDetails(dlState.get('jobs').find(j => j.id === jobId) ||
+        { id: jobId, status: 'pending' });
+    // Tracked poll handle; no local bare setInterval survives a close.
+    dlScheduler.start('details', refreshJobDetails, 1500, { immediate: false });
     detailsPane.style.display = 'flex';
+    if (!detailsSelectionWired) {
+        document.addEventListener('selectionchange', handleDetailsSelection);
+        detailsSelectionWired = true;
+    }
+    handleDetailsSelection();
 }
 
 // Called by the progress toast's "View details" link.
@@ -800,12 +1001,15 @@ async function openLatestJobDetails() {
 window.openLatestJobDetails = openLatestJobDetails;
 
 async function loadJobs() {
+    const token = dlScheduler.next('jobs');
     try {
         const res = await fetch('/api/jobs?limit=100');
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+        if (!dlScheduler.isCurrent('jobs', token)) return;  // stale response
         renderJobs(data.jobs || []);
     } catch (error) {
+        if (!dlScheduler.isCurrent('jobs', token)) return;
         const list = document.getElementById('jobsList');
         if (list) list.textContent = `Could not load jobs: ${error.message}`;
     }
@@ -818,12 +1022,12 @@ document.addEventListener('DOMContentLoaded', () => {
     if (toggle) {
         toggle.checked = true;
         toggle.addEventListener('change', () => {
-            if (jobsAutoRefresh) clearInterval(jobsAutoRefresh);
-            jobsAutoRefresh = toggle.checked ? setInterval(loadJobs, 5000) : null;
+            if (toggle.checked) dlScheduler.start('jobs', loadJobs, 5000);
+            else dlScheduler.stop('jobs');
         });
     }
     loadJobs();
-    jobsAutoRefresh = setInterval(loadJobs, 5000);
+    dlScheduler.start('jobs', loadJobs, 5000, { immediate: false });
 
     const list = document.getElementById('jobsList');
     if (list) {
@@ -845,4 +1049,21 @@ document.addEventListener('DOMContentLoaded', () => {
         });
         list.parentElement.insertBefore(clear, list.nextSibling);
     }
+});
+
+// Publish the API into the Blissful namespace; boot.js installs the thin
+// global aliases used by legacy inline handlers.
+window.Blissful.register({
+    sortJobsBy: sortJobsBy,
+    showDownloadsTab: showDownloadsTab,
+    retryJobTrack: retryJobTrack,
+    renderJobs: renderJobs,
+    showJobDetails: showJobDetails,
+    closeJobDetails: closeJobDetails,
+    openLatestJobDetails: openLatestJobDetails,
+    loadJobs: loadJobs,
+    renderJobs: renderJobs,
+    renderJobDetails: renderJobDetails,
+    refreshJobDetails: refreshJobDetails,
+    handleDetailsSelection: handleDetailsSelection
 });

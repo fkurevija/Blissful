@@ -92,6 +92,9 @@
         </div>
     </div>
 
+    <!-- JavaScript includes. boot.js owns window.Blissful and installs thin
+         global aliases on DOMContentLoaded; it must load first. -->
+    <script src="/static/js/boot.js?v={{ static_version }}"></script>
     <script src="/static/js/metadata.js?v={{ static_version }}"></script>
     <script src="/static/js/config.js?v={{ static_version }}"></script>
     <script src="/static/js/utils.js?v={{ static_version }}"></script>

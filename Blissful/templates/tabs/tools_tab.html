@@ -618,11 +618,11 @@ button.loading::before {
 })();
 
 function showNotification(message, type = 'info') {
-    // Use existing notification system
-    if (typeof window.showNotification === 'function') {
-        window.showNotification(message, type);
-    } else {
-        alert(message);
+    // Delegate to the single ToastManager owned by boot.js. This inline
+    // declaration predates the script tags, so resolve it at call time.
+    if (window.Blissful && window.Blissful.toasts) {
+        return window.Blissful.toasts.notify(message, type);
     }
+    alert(message);
 }
 </script>

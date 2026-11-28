@@ -236,3 +236,8 @@ function getMetadataProviderState() {
     });
     return state;
 }
+
+window.Blissful.register({
+    loadMetadataProviders: loadMetadataProviders,
+    getMetadataProviderState: getMetadataProviderState
+});

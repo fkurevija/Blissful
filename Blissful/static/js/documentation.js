@@ -214,6 +214,13 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 });
 
-// Export for global access
-window.documentationViewer = documentationViewer;
-window.initDocumentation = initDocumentation;
+// Publish a live accessor: the viewer is created lazily, so inline handlers
+// always resolve the current instance instead of a stale null global.
+Object.defineProperty(window, 'documentationViewer', {
+    configurable: true,
+    get: function () { return documentationViewer; }
+});
+window.Blissful.register({
+    initDocumentation: initDocumentation,
+    DocumentationViewer: DocumentationViewer
+});
