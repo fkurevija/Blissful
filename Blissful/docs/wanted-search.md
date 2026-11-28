@@ -21,8 +21,9 @@ Failed tracks appear in the Downloads tab's Failed tracks list and can be
 retried one at a time. The details pane has a Jump to last button for long logs.
 On mobile, tap the progress toast to shrink it to a small rounded square so it
 does not cover the log; tap the square to expand it again.
-The run's Details pane shows one track-progress bar that adds up the
-track counts of all its child download jobs; it stays on the aggregate
+The Details pane's track-progress bar and the job toast share one run-level
+aggregate: completed tracks are summed across child albums against the fixed
+run total, so both show the same completed/total and stay on the aggregate
 total when the active album changes. One search and one cleanup can run
 at the same time, and further requests of the same kind are queued rather
 than rejected — the action buttons stay clickable and show a queued hint. A child retry keeps the original album track count as `total_tracks` and only shrinks the remaining work, so `completed_tracks` can never overrun `total_tracks`.

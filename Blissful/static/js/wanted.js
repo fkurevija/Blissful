@@ -138,8 +138,9 @@ async function pollWantedProgress(lease) {
                     parts.push(`album #${active.album}`);
                 }
                 if (active.download_track) parts.push(`track: ${active.download_track}`);
-                if (active.current_track && active.total_tracks) {
-                    parts.push(`progress ${active.current_track}/${active.total_tracks}`);
+                const done = active.completed_tracks ?? active.current_track;
+                if (done && active.total_tracks) {
+                    parts.push(`progress ${done}/${active.total_tracks}`);
                 }
                 if (active.imported !== undefined) parts.push(`imported ${active.imported}`);
                 if (active.deleted !== undefined) parts.push(`deleted ${active.deleted}`);
@@ -154,8 +155,9 @@ async function pollWantedProgress(lease) {
                 } else if (active.album) {
                     parts.push(`album #${active.album}`);
                 }
-                if (active.current_track && active.total_tracks) {
-                    parts.push(`track ${active.current_track}/${active.total_tracks}`);
+                const done = active.completed_tracks ?? active.current_track;
+                if (done && active.total_tracks) {
+                    parts.push(`progress ${done}/${active.total_tracks}`);
                 }
                 if (active.command_status) parts.push(`Lidarr: ${active.command_status}`);
                 if (parts.length) detail += ' · ' + parts.join(', ');

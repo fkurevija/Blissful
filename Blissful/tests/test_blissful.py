@@ -18,6 +18,7 @@ sys.path.insert(0, str(APP_DIR))
 from extend.config_manager import ConfigManager  # noqa: E402
 from extend.download_manager import DownloadManager  # noqa: E402
 from extend.wanted_search import WantedSearchService  # noqa: E402
+
 from extend.audio_converter import AudioConverter  # noqa: E402
 from extend.album_manager import AlbumManager  # noqa: E402
 from extend.auth import install_auth  # noqa: E402
@@ -1169,6 +1170,44 @@ def test_same_kind_request_queues_while_other_kind_starts(tmp_path):
         assert called.get('apply') is True
     finally:
         service._run_locks['search'].release()
+
+
+def test_run_progress_aggregates_across_albums_and_never_overruns_total(tmp_path):
+    updates = []
+    jobs = []
+
+    class Service:
+        def _set_active(self, kind=None, **payload):
+            updates.append((kind, dict(payload)))
+
+    def job_progress(progress=None, **changes):
+        jobs.append(dict(progress or {}))
+
+    service = Service()
+    cb, state = WantedSearchService._aggregate_progress_callback(
+        service, job_progress, index=1, total_albums=2,
+        total_tracks=30, artist='A', album_title='Album1', kind='search',
+    )
+
+    cb('track', artist='A', album_title='Album1', album_id=1,
+       completed_tracks=4, download_index=4, current_track=4, total_tracks=10)
+    assert updates[-1][1]['current_track'] == 4
+    assert updates[-1][1]['completed_tracks'] == 4
+    assert updates[-1][1]['total_tracks'] == 30
+    assert jobs[-1]['current_track'] == 4
+
+    cb('track', artist='B', album_title='Album2', album_id=2,
+       completed_tracks=6, download_index=6, current_track=6, total_tracks=10)
+    assert updates[-1][1]['current_track'] == 10
+    assert updates[-1][1]['completed_tracks'] == 10
+    assert updates[-1][1]['total_tracks'] == 30
+
+    cb('track', artist='B', album_title='Album2', album_id=2,
+       completed_tracks=8, download_index=8, current_track=8, total_tracks=10)
+    assert updates[-1][1]['current_track'] == 12
+    assert updates[-1][1]['completed_tracks'] == 12
+    assert updates[-1][1]['total_tracks'] == 30
+    assert jobs[-1]['current_track'] == 12
 
 
 def test_child_album_progress_mirrors_to_parent(tmp_path):

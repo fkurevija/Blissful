@@ -489,12 +489,13 @@ function renderJobDetails(job) {
         bar.className = 'job-progress';
         const fill = document.createElement('div');
         fill.className = 'job-progress-fill';
-        fill.style.width = Math.min(100, Math.round((cur / tot) * 100)) + '%';
+        const shown = Math.min(Math.max(0, Number(cur) || 0), tot);
+        fill.style.width = Math.min(100, Math.round((shown / tot) * 100)) + '%';
         bar.appendChild(fill);
         summary.appendChild(bar);
         const label = document.createElement('span');
         label.className = 'job-progress-label';
-        label.textContent = `${cur}/${tot} tracks`;
+        label.textContent = `${shown}/${tot} tracks`;
         summary.appendChild(label);
     }
     const elapsed = job.started_at

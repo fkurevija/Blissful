@@ -1305,7 +1305,6 @@ class WantedSearchService:
 
                 })
 
-                progress_state['done_before'] += gap.get('imported') or 0
 
                 if gap_status not in ('succeeded', 'success', 'skipped'):
 
@@ -1478,46 +1477,44 @@ class WantedSearchService:
                                      total_tracks, artist, album_title,
                                      kind='cleanup'):
 
-        state = {'done_before': 0}
-
-
+        state = {'by_album': {}}
 
         def progress(phase, **details):
-
-            verified = details.get('verified') or 0
-
-            download_index = (details.get('download_download_index')
-
-                              or details.get('download_index') or 0)
-
-            current = state['done_before'] + (download_index or verified)
-
+            key = (
+                str(details.get('album_id') or details.get('album_title') or album_title or ''),
+                str(details.get('artist') or artist or ''),
+            )
+            completed = int(
+                details.get('download_download_index')
+                or details.get('download_index')
+                or details.get('completed_tracks')
+                or details.get('verified')
+                or 0
+            )
+            state['by_album'][key] = max(state['by_album'].get(key, 0), completed)
+            current = sum(state['by_album'].values())
             payload = {
-
                 'phase': phase,
-
-                'artist': artist,
-
-                'album_title': album_title,
-
+                'artist': details.get('artist') or artist,
+                'album_title': details.get('album_title') or album_title,
                 'album_index': index,
-
                 'total_albums': total_albums,
-
                 'current_track': current,
-
+                'completed_tracks': current,
                 'total_tracks': total_tracks,
-
             }
 
             payload.update(details)
+            # The run-level aggregate is the source of truth for the toast and
+            # Details bar: one child album can't reset or shrink the total.
+            payload['current_track'] = current
+            payload['completed_tracks'] = current
+            payload['total_tracks'] = total_tracks
 
             service._set_active(kind=kind, **payload)
 
             if callable(job_progress):
                 job_progress(progress=payload)
-
-
 
         return progress, state
 
@@ -1943,7 +1940,6 @@ class WantedSearchService:
 
                 })
 
-                progress_state['done_before'] += gap.get('imported') or 0
 
                 self._remove_stale_queue_records(
                     client, records, report, album_id, title)
