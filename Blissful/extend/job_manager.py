@@ -102,6 +102,7 @@ class JobManager:
                 'result': None,
                 'log': [],
                 'parent_id': parent_id,
+                'progress_total': len(payload.get('tracks') or []),
                 'created_at': _now(),
                 'started_at': None,
                 'finished_at': None,
@@ -506,11 +507,13 @@ class JobManager:
                         album_title=payload.get('album'))
         try:
             if job.get('kind') == 'album':
+                tracks = payload.get('pending_tracks') or payload.get('tracks', [])
                 result = self.album_manager.download_album(
                     artist=payload.get('artist', ''),
                     album=payload.get('album', ''),
-                    tracks=payload.get('pending_tracks') or payload.get('tracks', []),
+                    tracks=tracks,
                     target_path=payload.get('target_path', ''),
+                    total_tracks=int(job.get('progress_total') or 0) or len(tracks),
                     resume_state=payload.get('resume_state'),
                     should_cancel=lambda: (
                         (self.get_job(job['id']) or {}).get('status') == 'cancelled'),

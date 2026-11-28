@@ -1085,6 +1085,42 @@ def test_cleanup_deletes_queue_when_lidarr_has_all_tracks(tmp_path):
     assert any('already imported in Lidarr' in str(s) for s in report['skipped'])
 
 
+def test_retry_job_keeps_original_track_total(tmp_path):
+    class Config:
+        def get_setting(self, key, default=None):
+            return default
+
+    class Album:
+        def __init__(self):
+            self.captured = {}
+        def download_album(self, **kwargs):
+            self.captured = kwargs
+            total = int(kwargs.get('total_tracks') or 0)
+            return {
+                'success': True,
+                'total_tracks': total,
+                'completed_tracks': total,
+                'successful': total,
+                'failed': 0,
+                'pending_tracks': [],
+                'tracks': [],
+                'rounds': 1,
+            }
+
+    manager = JobManager(Config(), Album(), str(tmp_path / 'jobs.json'))
+    job, _ = manager.enqueue('album', {'artist': 'A', 'album': 'B',
+                                       'tracks': [{'title': f'track {i}'} for i in range(10)]})
+    assert job['progress_total'] == 10
+
+    # Simulate a retry whose payload only carries remaining failures.
+    job['payload'] = dict(job['payload'])
+    job['payload']['pending_tracks'] = [{'title': 'track 9'}]
+    manager._process(job)
+    assert manager.album_manager.captured['total_tracks'] == 10
+    assert manager.get_job(job['id'])['progress']['total_tracks'] == 10
+    assert manager.get_job(job['id'])['progress']['completed_tracks'] <= manager.get_job(job['id'])['progress']['total_tracks']
+
+
 def test_parent_progress_reaggregates_after_child_hook_update(tmp_path):
     class Config:
         def get_setting(self, key, default=None):

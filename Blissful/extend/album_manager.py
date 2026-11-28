@@ -173,7 +173,7 @@ class AlbumManager:
     
     def download_album(self, artist, album, tracks, target_path='',
                        should_cancel=None, retry_delay=None, on_progress=None,
-                       resume_state=None):
+                       resume_state=None, total_tracks=None):
         """Download every track, retrying only the failures in later rounds.
 
         A failed track never blocks the rest of the album: it is left pending
@@ -183,7 +183,7 @@ class AlbumManager:
         """
         try:
             logger.info(f"Downloading album: {artist} - {album} ({len(tracks)} tracks)")
-            total = len(tracks)
+            total = int(total_tracks) if isinstance(total_tracks, (int, float)) and int(total_tracks) > 0 else len(tracks)
             managed = callable(should_cancel)
             resume_state = resume_state if isinstance(resume_state, dict) else {}
             rounds_done = int(resume_state.get('rounds', 0))
