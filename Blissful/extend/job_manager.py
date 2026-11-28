@@ -400,6 +400,30 @@ class JobManager:
                     return dict(job)
         return None
 
+    def _mirror_child_progress_locked(self, job):
+        """Surface child album track counts on the parent run for the UI bar."""
+        parent_id = job.get('parent_id')
+        if not parent_id:
+            return
+        progress = job.get('progress') or {}
+        if 'completed_tracks' not in progress and 'total_tracks' not in progress:
+            return
+        parent = next((p for p in self.jobs if p.get('id') == parent_id), None)
+        if parent is None:
+            return
+        children = [c for c in self.jobs if c.get('parent_id') == parent_id]
+        completed = sum(int((c.get('progress') or {}).get('completed_tracks') or 0)
+                        for c in children)
+        total = sum(int((c.get('progress') or {}).get('total_tracks') or 0)
+                    for c in children)
+        if not total:
+            return
+        parent_progress = dict(parent.get('progress') or {})
+        parent_progress['completed_tracks'] = completed
+        parent_progress['total_tracks'] = total
+        parent['progress'] = parent_progress
+        parent['updated_at'] = _now()
+
     def update_job(self, job_id, **changes):
         """Update an externally-managed job (search runs, etc.)."""
         with self._lock:
@@ -423,6 +447,7 @@ class JobManager:
                         job['started_at'] = now
                     if changes.get('status') in TERMINAL_STATUSES and not job.get('finished_at'):
                         job['finished_at'] = now
+                    self._mirror_child_progress_locked(job)
                     self._persist()
                     return dict(job)
         return None

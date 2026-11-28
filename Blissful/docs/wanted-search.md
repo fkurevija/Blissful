@@ -21,6 +21,8 @@ Failed tracks appear in the Downloads tab's Failed tracks list and can be
 retried one at a time. The details pane has a Jump to last button for long logs.
 On mobile, tap the progress toast to shrink it to a small rounded square so it
 does not cover the log; tap the square to expand it again.
+The run's Details pane shows one track-progress bar that adds up the
+track counts of all its child download jobs.
 When Lidarr already has every track, cleanup removes the stuck queue row
 instead of reporting "no missing tracks" and leaving the torrent there.
 Progress from a child download job is written to the run that owns it,

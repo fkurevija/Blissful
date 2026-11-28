@@ -1084,6 +1084,30 @@ def test_cleanup_deletes_queue_when_lidarr_has_all_tracks(tmp_path):
     assert any('already imported in Lidarr' in str(s) for s in report['skipped'])
 
 
+def test_child_album_progress_mirrors_to_parent(tmp_path):
+    class Config:
+        def get_setting(self, key, default=None):
+            return default
+
+    manager = JobManager(Config(), None, str(tmp_path / 'jobs.json'))
+    parent, _ = manager.enqueue('search', {'mode': 'all', 'count': 1})
+    child, _ = manager.enqueue('album', {'artist': 'A', 'album': 'B'},
+                               parent_id=parent['id'])
+    manager.update_job(child['id'], progress={
+        'phase': 'track', 'completed_tracks': 3, 'total_tracks': 10})
+    mirrored = manager.get_job(parent['id'])['progress']
+    assert mirrored['completed_tracks'] == 3
+    assert mirrored['total_tracks'] == 10
+
+    second, _ = manager.enqueue('album', {'artist': 'C', 'album': 'D'},
+                                parent_id=parent['id'])
+    manager.update_job(second['id'], progress={
+        'phase': 'track', 'completed_tracks': 2, 'total_tracks': 5})
+    mirrored = manager.get_job(parent['id'])['progress']
+    assert mirrored['completed_tracks'] == 5
+    assert mirrored['total_tracks'] == 15
+
+
 def test_download_progress_is_isolated_per_job(tmp_path):
     manager = DownloadManager(str(tmp_path))
     manager.set_progress_context('job-a')
