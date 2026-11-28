@@ -2,7 +2,12 @@
 """
 Simple API test script to verify Blissful is working
 Make sure Blissful.py is running before executing this script
+
+This is a manual check script driven by main(); its functions return
+bool and require a live service, so pytest must not collect them.
 """
+
+__test__ = False
 
 import requests
 import json
