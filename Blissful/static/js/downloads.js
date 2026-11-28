@@ -478,10 +478,6 @@ function renderJobDetails(job) {
     if (!logWrap) {
         logWrap = document.createElement('div');
         logWrap.className = 'job-details-log-wrap';
-        const label = document.createElement('div');
-        label.className = 'job-detail-heading';
-        label.textContent = 'Live log:';
-        logWrap.appendChild(label);
         const controls = document.createElement('div');
         controls.className = 'log-filter-controls';
         const text = document.createElement('input');
@@ -766,14 +762,12 @@ function showJobDetails(jobId) {
             <div class="job-details-summary"></div>
             <div class="job-details-body"></div>
             <div class="job-details-footer">
-                <button type="button" class="btn btn-secondary job-details-copy-md">Copy Markdown</button>
                 <button type="button" class="btn btn-secondary job-details-jump">Jump to last</button>
                 <button type="button" class="btn btn-secondary job-details-copy">Copy logs</button>
             </div>
         `;
         pane.querySelector('.job-details-close').addEventListener('click', closeJobDetails);
         pane.querySelector('.job-details-copy').addEventListener('click', e => copyText(detailsPlainText, e.currentTarget));
-        pane.querySelector('.job-details-copy-md').addEventListener('click', e => copyText(detailsMarkdown, e.currentTarget));
         pane.querySelector('.job-details-jump').addEventListener('click', () => {
             const log = detailsPane.querySelector('.job-details-log');
             if (log) { log.scrollTop = log.scrollHeight; log.dataset.init = '1'; }

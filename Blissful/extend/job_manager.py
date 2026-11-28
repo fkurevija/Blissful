@@ -402,16 +402,13 @@ class JobManager:
 
     def _mirror_child_progress_locked(self, job):
         """Surface child album track counts on the parent run for the UI bar."""
-        parent_id = job.get('parent_id')
-        if not parent_id:
-            return
-        progress = job.get('progress') or {}
-        if 'completed_tracks' not in progress and 'total_tracks' not in progress:
-            return
+        parent_id = job.get('parent_id') or job.get('id')
         parent = next((p for p in self.jobs if p.get('id') == parent_id), None)
         if parent is None:
             return
         children = [c for c in self.jobs if c.get('parent_id') == parent_id]
+        if not children:
+            return
         completed = sum(int((c.get('progress') or {}).get('completed_tracks') or 0)
                         for c in children)
         total = sum(int((c.get('progress') or {}).get('total_tracks') or 0)

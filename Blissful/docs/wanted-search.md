@@ -22,7 +22,10 @@ retried one at a time. The details pane has a Jump to last button for long logs.
 On mobile, tap the progress toast to shrink it to a small rounded square so it
 does not cover the log; tap the square to expand it again.
 The run's Details pane shows one track-progress bar that adds up the
-track counts of all its child download jobs.
+track counts of all its child download jobs; it stays on the aggregate
+total when the active album changes. One search and one cleanup can run
+at the same time, and further requests of the same kind are queued rather
+than rejected — the action buttons stay clickable and show a queued hint.
 When Lidarr already has every track, cleanup removes the stuck queue row
 instead of reporting "no missing tracks" and leaving the torrent there.
 Progress from a child download job is written to the run that owns it,

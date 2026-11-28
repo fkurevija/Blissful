@@ -22,12 +22,19 @@ async function wantedApi(url, options = {}) {
 
 const WANTED_ACTION_IDS = ['searchSelected', 'searchAll', 'cleanupStale'];
 
-function setWantedButtonsBusy(busy) {
+function setWantedButtonHints(runs) {
+    const searchBusy = !!(runs && runs.search);
+    const cleanupBusy = !!(runs && runs.cleanup);
     WANTED_ACTION_IDS.forEach(id => {
         const el = document.getElementById(id);
         if (!el) return;
-        el.disabled = busy;
-        el.title = busy ? 'A wanted search or cleanup is already running' : '';
+        el.disabled = false;
+        const isCleanup = id === 'cleanupStale';
+        el.title = isCleanup && cleanupBusy
+            ? 'A cleanup is already running; this request will be queued'
+            : !isCleanup && searchBusy
+              ? 'A wanted search is already running; this request will be queued'
+              : '';
     });
 }
 
@@ -36,8 +43,9 @@ function setWantedButtonsBusy(busy) {
 const WANTED_TOAST_ID = 'wanted-toast-active';
 let wantedActiveShown = false;
 
-function applyWantedBusy(active) {
-    setWantedButtonsBusy(!!active);
+function applyWantedBusy(status) {
+    const active = status && status.active;
+    setWantedButtonHints(status && status.runs);
     if (active && !wantedActiveShown) {
         wantedActiveShown = true;
         beginWantedProgress(active.kind === 'cleanup'
@@ -49,7 +57,7 @@ function applyWantedBusy(active) {
 async function watchWantedBusy() {
     try {
         const status = await wantedApi('/api/wanted/status');
-        applyWantedBusy(status.active);
+        applyWantedBusy(status);
     } catch (e) {
         // Status polling is best-effort; never break the page on a transient error.
     }
@@ -345,7 +353,7 @@ async function loadWantedSettings() {
         document.getElementById('staleCleanupWait').value = status.stale_cleanup_wait_minutes || 10;
         document.getElementById('preferBlissfulForStale').checked = status.prefer_blissful_for_stale !== false;
         document.getElementById('removeFromClient').checked = status.stale_cleanup_remove_from_client !== false;
-        applyWantedBusy(status.active);
+        applyWantedBusy(status);
     } catch (error) {
         showNotification(`Could not load wanted settings: ${error.message}`, 'error');
     }
@@ -395,7 +403,6 @@ async function runWantedSearch(mode) {
         showNotification('Select at least one album first', 'warning');
         return;
     }
-    setWantedButtonsBusy(true);
     beginWantedProgress(apply ? 'Queuing searches' : 'Previewing search');
     try {
         const result = await wantedApi('/api/wanted/search', {
@@ -423,7 +430,6 @@ async function runWantedSearch(mode) {
             finishWantedToast(`Search failed: ${error.message}`, 'error');
         }
     } finally {
-        setWantedButtonsBusy(false);
         watchWantedBusy();
     }
 }
@@ -431,7 +437,6 @@ async function runWantedSearch(mode) {
 async function runStaleCleanup() {
     const apply = document.getElementById('staleApply').checked;
     const record_ids = selectedValues('staleList', 'recordId');
-    setWantedButtonsBusy(true);
     beginWantedProgress(apply ? 'Cleaning stale torrents' : 'Previewing cleanup');
     try {
         const result = await wantedApi('/api/stale-torrents/cleanup', {
@@ -460,7 +465,6 @@ async function runStaleCleanup() {
             finishWantedToast(`Cleanup failed: ${error.message}`, 'error');
         }
     } finally {
-        setWantedButtonsBusy(false);
         watchWantedBusy();
     }
 }

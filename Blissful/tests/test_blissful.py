@@ -17,6 +17,7 @@ sys.path.insert(0, str(APP_DIR))
 
 from extend.config_manager import ConfigManager  # noqa: E402
 from extend.download_manager import DownloadManager  # noqa: E402
+from extend.wanted_search import WantedSearchService  # noqa: E402
 from extend.audio_converter import AudioConverter  # noqa: E402
 from extend.album_manager import AlbumManager  # noqa: E402
 from extend.auth import install_auth  # noqa: E402
@@ -1082,6 +1083,56 @@ def test_cleanup_deletes_queue_when_lidarr_has_all_tracks(tmp_path):
     assert deleted == [11]
     assert report['counts']['deleted'] == 1
     assert any('already imported in Lidarr' in str(s) for s in report['skipped'])
+
+
+def test_parent_progress_reaggregates_after_child_hook_update(tmp_path):
+    class Config:
+        def get_setting(self, key, default=None):
+            return default
+
+    manager = JobManager(Config(), None, str(tmp_path / 'jobs.json'))
+    parent, _ = manager.enqueue('search', {'mode': 'all', 'count': 1})
+    for total in (40, 23):
+        child, _ = manager.enqueue('album', {'artist': 'A', 'album': str(total)},
+                                   parent_id=parent['id'])
+        manager.update_job(child['id'], progress={
+            'phase': 'track', 'completed_tracks': 3, 'total_tracks': total})
+    # A child progress hook writing onto the parent must not leave one
+    # album's counts showing instead of the aggregate.
+    manager.update_job(parent['id'], progress={
+        'phase': 'track', 'completed_tracks': 3, 'total_tracks': 23})
+    mirrored = manager.get_job(parent['id'])['progress']
+    assert mirrored['completed_tracks'] == 6
+    assert mirrored['total_tracks'] == 63
+
+
+def test_same_kind_request_queues_while_other_kind_starts(tmp_path):
+    class Config:
+        def get_setting(self, key, default=None):
+            return default
+
+    manager = JobManager(Config(), None, str(tmp_path / 'jobs.json'))
+    service = WantedSearchService(Config(), object(), job_manager=manager)
+    assert service._run_locks['search'].acquire(blocking=False)
+    try:
+        queued = service.search(apply=True)
+        assert queued.get('queued') is True
+        assert queued.get('already_running') is False
+        assert any(j.get('source') == 'wanted-ui'
+                   for j in manager.list_jobs(limit=50))
+
+        called = {}
+
+        def fake_cleanup(**kwargs):
+            called.update(kwargs)
+            return {'success': True, 'started': True}
+
+        service.cleanup_stale = fake_cleanup
+        other = service.cleanup_stale(apply=True)
+        assert other.get('started') is True
+        assert called.get('apply') is True
+    finally:
+        service._run_locks['search'].release()
 
 
 def test_child_album_progress_mirrors_to_parent(tmp_path):
