@@ -38,145 +38,96 @@ function setWantedButtonHints(runs) {
     });
 }
 
-// One shared toast for every wanted run, whether started here, by the
-// scheduler, or in another tab. This avoids stacked "started" toasts.
-const WANTED_TOAST_ID = 'wanted-toast-active';
-let wantedActiveShown = false;
+// Wanted-run status lives in the store; the toast lifecycle lives in the
+// single ToastManager. There are no module-local toast flags or state maps.
+const state = window.Blissful.state;
+const scheduler = window.Blissful.scheduler;
+const toasts = window.Blissful.toasts;
+
+/**
+ * Fetch /api/wanted/status under the scheduler's monotonic sequence guard.
+ * Returns undefined when a newer poll on the same channel has started, so a
+ * slow older response can never overwrite newer wantedRun/toast state.
+ */
+async function fetchWantedStatus(channelName) {
+    channelName = channelName || 'wantedStatus';
+    const token = scheduler.next(channelName);
+    const status = await wantedApi('/api/wanted/status');
+    if (!scheduler.isCurrent(channelName, token)) return undefined;
+    return status;
+}
 
 function applyWantedBusy(status) {
-    const active = status && status.active;
-    setWantedButtonHints(status && status.runs);
-    if (active && !wantedActiveShown) {
-        wantedActiveShown = true;
-        beginWantedProgress(active.kind === 'cleanup'
-            ? 'Cleaning stale torrents' : 'Searching wanted albums');
-    }
-    if (!active) wantedActiveShown = false;
+    if (!status) return;
+    setWantedButtonHints(status.runs);
+    state.patch('wantedRun', {
+        active: status.active || null,
+        runs: status.runs || {},
+        lastActivity: status.last_activity || null
+    }, { source: 'wanted/status' });
+    toasts.syncRun(status);
 }
 
 async function watchWantedBusy() {
     try {
-        const status = await wantedApi('/api/wanted/status');
-        applyWantedBusy(status);
+        const status = await fetchWantedStatus('wantedStatus');
+        if (status) applyWantedBusy(status);
     } catch (e) {
         // Status polling is best-effort; never break the page on a transient error.
     }
 }
 
-// Sticky progress toasts for long-running wanted/cleanup actions.
-const wantedToastState = {};
-
+/**
+ * Thin boundary wrappers. The DOM, lease lifecycle and auto-dismiss timers all
+ * live in boot.js's ToastManager; only the public names stay here for callers.
+ */
 function wantedToast(id, message, type) {
-    let el = document.getElementById(id);
-    if (!el) {
-        el = document.createElement('div');
-        el.id = id;
-        el.className = 'wanted-toast';
-        el.innerHTML = '<span class="wanted-toast-dot"></span><span class="wanted-toast-text"></span>' +
-            '<button type="button" class="wanted-toast-cancel">Cancel</button>' +
-            '<button type="button" class="wanted-toast-details" style="display:none">View details →</button>' +
-            '<button type="button" class="wanted-toast-link" style="display:none">View downloads →</button>';
-        const link = el.querySelector('.wanted-toast-link');
-        link.addEventListener('click', () => showDownloadsTab());
-        const details = el.querySelector('.wanted-toast-details');
-        details.addEventListener('click', () => {
-            if (typeof window.openLatestJobDetails === 'function') window.openLatestJobDetails();
-            else showDownloadsTab();
-        });
-        const cancel = el.querySelector('.wanted-toast-cancel');
-        cancel.addEventListener('click', async () => {
-            try {
-                const data = await wantedApi(
-                    '/api/wanted/cancel', { method: 'POST', body: '{}' });
-                cancel.disabled = true;
-                if (data && data.cancelled === false) {
-                    // No live run exists; the toast is stale, so close it.
-                    finishWantedToast('No active run to cancel', 'info', true);
-                    return;
-                }
-                const text = el.querySelector('.wanted-toast-text');
-                if (text) text.textContent = 'Cancelling…';
-            } catch (e) {
-                cancel.disabled = true;
-            }
-        });
-        el.tabIndex = 0;
-        el.title = 'Tap to collapse or expand';
-        const isMobile = () => !window.matchMedia
-            || window.matchMedia('(max-width: 768px)').matches;
-        const toggleCollapsed = () => {
-            if (!isMobile()) return;
-            el.classList.toggle('wanted-toast-collapsed');
-        };
-        el.addEventListener('click', event => {
-            if (event.target.closest('button')) return;
-            toggleCollapsed();
-        });
-        el.addEventListener('keydown', event => {
-            if (event.key === 'Enter' || event.key === ' ') {
-                event.preventDefault();
-                toggleCollapsed();
-            }
-        });
-        if (window.matchMedia) {
-            const query = window.matchMedia('(max-width: 768px)');
-            const expandOnDesktop = change => {
-                if (!change.matches) el.classList.remove('wanted-toast-collapsed');
-            };
-            if (query.addEventListener) query.addEventListener('change', expandOnDesktop);
-            else if (query.addListener) query.addListener(expandOnDesktop);
-        }
-        document.body.appendChild(el);
+    if (id === 'youtube-login-toast') {
+        toasts.youtube(message, type);
+        return document.getElementById(id);
     }
-    el.dataset.type = type || 'info';
-    const text = el.querySelector('.wanted-toast-text');
-    if (text) text.textContent = message;
-    return el;
+    let lease = toasts.currentLease();
+    if (!lease && message) {
+        toasts.beginRun(String(message).split(' — ')[0]);
+        lease = toasts.currentLease();
+    }
+    toasts.updateRun(lease, message, type);
+    return document.getElementById('wanted-toast-active');
 }
 
 function finishWantedToast(message, type, showLink) {
-    const state = wantedToastState[WANTED_TOAST_ID] || { done: false };
-    state.done = true;
-    wantedActiveShown = false;
-    const el = wantedToast(WANTED_TOAST_ID, message, type);
-    const link = el.querySelector('.wanted-toast-link');
-    if (link) link.style.display = showLink ? 'inline-block' : 'none';
-    const details = el.querySelector('.wanted-toast-details');
-    if (details) details.style.display = showLink ? 'inline-block' : 'none';
-    const cancel = el.querySelector('.wanted-toast-cancel');
-    if (cancel) cancel.style.display = 'none';
-    setTimeout(() => {
-        const el = document.getElementById(WANTED_TOAST_ID);
-        if (el) el.remove();
-        delete wantedToastState[WANTED_TOAST_ID];
-    }, type === 'error' ? 8000 : 5000);
+    toasts.finishRun(toasts.currentLease(), message, type, showLink);
 }
 
-async function pollWantedProgress(label) {
-    const state = wantedToastState[WANTED_TOAST_ID] || { done: false };
-    const started = Date.now();
-    let sawActive = false;
-    while (!state.done) {
-        await new Promise(resolve => setTimeout(resolve, 1500));
-        if (state.done) break;
+/**
+ * Progress poll for one run lease. Its status fetch uses its own scheduler
+ * channel so the 5 s background status poll cannot invalidate its response.
+ */
+async function pollWantedProgress(lease) {
+    if (!lease) return;
+    const label = lease.label;
+    const started = lease.startedAt;
+    while (!lease.done && toasts.isCurrent(lease)) {
+        await new Promise(resolve => scheduler.schedule('wantedProgress', resolve, 1500));
+        if (lease.done || !toasts.isCurrent(lease)) break;
         const elapsed = Math.round((Date.now() - started) / 1000);
         let detail = 'working';
         try {
-            const status = await wantedApi('/api/wanted/status');
+            const status = await fetchWantedStatus('wantedProgressStatus');
+            if (!status) break;  // superseded by a newer poll on this channel
             const active = status.active;
-            if (!active && sawActive) {
+            if (!active && lease.sawActive) {
                 // The run ended (or was cancelled) outside this tab. Close the
                 // sticky toast instead of polling stale progress forever.
-                state.done = true;
                 const last = status.last_activity || {};
                 const wasCancelled = last.cancel_requested === true
                     || last.status === 'cancelled';
-                finishWantedToast(
+                toasts.finishRun(lease,
                     wasCancelled ? `${label} cancelled` : `${label} finished`,
                     wasCancelled ? 'info' : 'success', true);
                 break;
             }
-            if (active) sawActive = true;
+            if (active) lease.sawActive = true;
             if (active && active.kind === 'cleanup') {
                 detail = active.phase || 'searching';
                 const parts = [];
@@ -212,18 +163,14 @@ async function pollWantedProgress(label) {
         } catch (e) {
             detail = 'status unavailable';
         }
-        if (!state.done) wantedToast(WANTED_TOAST_ID, `${label} — ${detail} (${elapsed}s)`, 'info');
+        if (!lease.done) toasts.updateRun(lease, `${label} — ${detail} (${elapsed}s)`, 'info');
         if (elapsed > 900) break;
     }
+    scheduler.cancelSchedule('wantedProgress');
 }
 
 function beginWantedProgress(label) {
-    wantedActiveShown = true;
-    const state = wantedToastState[WANTED_TOAST_ID];
-    wantedToast(WANTED_TOAST_ID, `${label} — starting…`, 'info');
-    if (state && !state.done) return;  // a progress poll is already running
-    wantedToastState[WANTED_TOAST_ID] = { done: false };
-    pollWantedProgress(label);
+    toasts.beginRun(label);
 }
 
 function wantedResult(id, value) {
@@ -346,13 +293,25 @@ function renderStaleList(items) {
 
 async function loadWantedSettings() {
     try {
-        const status = await wantedApi('/api/wanted/status');
-        document.getElementById('wantedSearchEnabled').checked = !!status.wanted_search_enabled;
-        document.getElementById('staleCleanupEnabled').checked = !!status.stale_cleanup_enabled;
-        document.getElementById('staleCleanupInterval').value = status.stale_cleanup_interval_hours || 6;
-        document.getElementById('staleCleanupWait').value = status.stale_cleanup_wait_minutes || 10;
-        document.getElementById('preferBlissfulForStale').checked = status.prefer_blissful_for_stale !== false;
-        document.getElementById('removeFromClient').checked = status.stale_cleanup_remove_from_client !== false;
+        // Own channel: the 5 s background poll must not invalidate this one.
+        const status = await fetchWantedStatus('wantedSettings');
+        if (!status) return;
+        const settings = {
+            wanted_search_enabled: !!status.wanted_search_enabled,
+            stale_cleanup_enabled: !!status.stale_cleanup_enabled,
+            stale_cleanup_interval_hours: status.stale_cleanup_interval_hours || 6,
+            stale_cleanup_wait_minutes: status.stale_cleanup_wait_minutes || 10,
+            prefer_blissful_for_stale: status.prefer_blissful_for_stale !== false,
+            stale_cleanup_remove_from_client: status.stale_cleanup_remove_from_client !== false
+        };
+        state.patch('wantedRun', { settings: settings }, { source: 'wanted/settings' });
+        // DOM is a projection of the store slice.
+        document.getElementById('wantedSearchEnabled').checked = settings.wanted_search_enabled;
+        document.getElementById('staleCleanupEnabled').checked = settings.stale_cleanup_enabled;
+        document.getElementById('staleCleanupInterval').value = settings.stale_cleanup_interval_hours;
+        document.getElementById('staleCleanupWait').value = settings.stale_cleanup_wait_minutes;
+        document.getElementById('preferBlissfulForStale').checked = settings.prefer_blissful_for_stale;
+        document.getElementById('removeFromClient').checked = settings.stale_cleanup_remove_from_client;
         applyWantedBusy(status);
     } catch (error) {
         showNotification(`Could not load wanted settings: ${error.message}`, 'error');
@@ -368,6 +327,7 @@ async function saveWantedSettings() {
         prefer_blissful_for_stale: document.getElementById('preferBlissfulForStale').checked,
         stale_cleanup_remove_from_client: document.getElementById('removeFromClient').checked
     };
+    state.patch('wantedRun', { settings: payload }, { source: 'dom' });
     try {
         await wantedApi('/api/config', { method: 'POST', body: JSON.stringify(payload) });
         showNotification('Wanted search settings saved. Restart the scheduler to pick up the interval.', 'success');
@@ -487,5 +447,26 @@ document.addEventListener('DOMContentLoaded', () => {
     });
     wire('cleanupStale', runStaleCleanup);
     loadWantedSettings();
-    setInterval(watchWantedBusy, 5000);
+    // Tracked poll with a handle (stop/restart) instead of a bare setInterval.
+    scheduler.start('wantedStatus', watchWantedBusy, 5000);
+});
+
+// Publish the public API into the single Blissful namespace. boot.js installs
+// the thin global aliases used by legacy inline handlers.
+window.Blissful.register({
+    wantedApi: wantedApi,
+    fetchWantedStatus: fetchWantedStatus,
+    applyWantedBusy: applyWantedBusy,
+    watchWantedBusy: watchWantedBusy,
+    wantedToast: wantedToast,
+    finishWantedToast: finishWantedToast,
+    pollWantedProgress: pollWantedProgress,
+    beginWantedProgress: beginWantedProgress,
+    runWantedSearch: runWantedSearch,
+    runStaleCleanup: runStaleCleanup,
+    loadWantedSettings: loadWantedSettings,
+    saveWantedSettings: saveWantedSettings,
+    loadWanted: loadWanted,
+    loadStale: loadStale,
+    selectedValues: selectedValues
 });

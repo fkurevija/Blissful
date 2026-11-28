@@ -16,7 +16,8 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
-TERMINAL_STATUSES = {'succeeded', 'failed', 'cancelled'}
+from extend.domain import TERMINAL_STATUSES
+
 RETRY_BASE_SECONDS = 30.0
 RETRY_MAX_SECONDS = 300.0
 

@@ -1,0 +1,56 @@
+name: Tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out this fork
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      # GitHub runners have no Windows `py` launcher. Provide a small shim so
+      # CI runs the exact same command as the local check: py -3.11 -m pytest -q
+      - name: Provide py -3.11 launcher
+        run: |
+          mkdir -p "$RUNNER_TEMP/pyshim"
+          cat > "$RUNNER_TEMP/pyshim/py" <<'SHIM'
+          #!/usr/bin/env bash
+          if [ "${1:-}" = "-3.11" ]; then shift; fi
+          exec python3.11 "$@"
+          SHIM
+          chmod +x "$RUNNER_TEMP/pyshim/py"
+          echo "$RUNNER_TEMP/pyshim" >> "$GITHUB_PATH"
+
+      - name: Install Python dependencies
+        run: py -3.11 -m pip install -r Blissful/requirements.txt pytest
+
+      - name: Check JavaScript syntax
+        run: |
+          for file in Blissful/static/js/*.js; do
+            node --check "$file"
+          done
+
+      # Three consecutive runs expose order-dependent and wall-clock flakes.
+      - name: Pytest (three consecutive runs)
+        run: |
+          for run in 1 2 3; do
+            echo "::group::pytest run ${run}"
+            py -3.11 -m pytest -q
+            echo "::endgroup::"
+          done

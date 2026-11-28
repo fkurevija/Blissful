@@ -41,6 +41,144 @@ const qualityPresets = {
     ]
 };
 
+/* ------------------------------------------------------------------ *
+ * Declarative config schema — one descriptor per persisted key.
+ * Load, save, masking and KEEP_EXISTING are all driven from this table,
+ * so adding a setting no longer means editing mirrored DOM schemas.
+ * ------------------------------------------------------------------ */
+const CfgB = window.Blissful;
+const CONFIG_STATE = CfgB.state;
+const CONFIG_SCHED = CfgB.scheduler;
+
+const CONFIG_FIELDS = [
+    { key: 'lidarr_url', id: 'lidarrUrl', type: 'text', default: '' },
+    { key: 'lidarr_api_key', id: 'lidarrApiKey', type: 'secret', default: '', trim: true,
+      maskedPlaceholder: 'API Key configured (enter new key to change)',
+      plainPlaceholder: 'Your Lidarr API Key' },
+    { key: 'output_format', id: 'outputFormat', type: 'select', default: 'mp3' },
+    { key: 'quality', id: 'quality', type: 'select', default: '320k' },
+    { key: 'normalize_audio', id: 'normalizeAudio', type: 'bool', default: false },
+    { key: 'mono_audio', id: 'monoAudio', type: 'bool', default: false },
+    { key: 'sample_rate', id: 'sampleRate', type: 'select', default: 'original' },
+    { key: 'remove_silence', id: 'removeSilence', type: 'bool', default: false },
+    { key: 'loudness_normalization', id: 'loudnessNorm', type: 'bool', default: false },
+    { key: 'channels', id: 'channels', type: 'select', default: 'original' },
+    { key: 'auto_cleanup', id: 'autoCleanup', type: 'boolDefaultOn', default: true },
+    { key: 'embed_metadata', id: 'embedMetadata', type: 'boolDefaultOn', default: true },
+    { key: 'embed_thumbnail', id: 'embedThumbnail', type: 'boolDefaultOn', default: true },
+    { key: 'auth_token', id: 'authToken', type: 'secret', default: '', trim: true,
+      maskedPlaceholder: 'Token configured (leave blank to keep)' },
+    { key: 'search_results_per_source', id: 'searchResultsPerSource', type: 'int',
+      default: 3, min: 1, max: 10 },
+    { key: 'youtube_cookies', selector: '.youtube-cookies-field', type: 'sharedSecret',
+      default: '', maskedPlaceholder: 'Cookies configured (leave blank to keep)',
+      plainPlaceholder: 'Or paste Netscape-format cookies.txt from a signed-in browser' },
+    { key: 'enable_requests', id: 'enableRequests', type: 'bool', default: false },
+    { key: 'auto_monitor_requests', id: 'autoMonitorRequests', type: 'bool', default: false },
+    { key: 'enable_jellyfin', id: 'enableJellyfin', type: 'bool', default: false },
+    { key: 'jellyfin_url', id: 'jellyfinUrl', type: 'text', default: '' },
+    { key: 'jellyfin_api_key', id: 'jellyfinApiKey', type: 'text', default: '' },
+    { key: 'enable_emby', id: 'enableEmby', type: 'bool', default: false },
+    { key: 'emby_url', id: 'embyUrl', type: 'text', default: '' },
+    { key: 'emby_api_key', id: 'embyApiKey', type: 'text', default: '' },
+    { key: 'enable_plex', id: 'enablePlex', type: 'bool', default: false },
+    { key: 'request_default_monitored', id: 'requestDefaultMonitored',
+      type: 'boolFromSelect', default: false },
+    { key: 'request_search_missing', id: 'requestSearchMissing',
+      type: 'boolFromSelect', default: false }
+];
+
+const QUALITY_FIELD = CONFIG_FIELDS.find(f => f.key === 'quality');
+const COOKIES_FIELD = CONFIG_FIELDS.find(f => f.type === 'sharedSecret');
+const SECRET_KEYS = ['lidarr_api_key', 'spotify_client_secret', 'discogs_token',
+    'acoustid_api_key', 'acoustid_user_key', 'auth_token'];
+
+function fieldElements(desc) {
+    if (desc.selector) return Array.prototype.slice.call(document.querySelectorAll(desc.selector));
+    const el = document.getElementById(desc.id);
+    return el ? [el] : [];
+}
+
+/** Project one config value into its DOM element(s). */
+function loadField(desc, config, savedFlags) {
+    const elements = fieldElements(desc);
+    if (!elements.length) return;
+    const value = config[desc.key];
+
+    if (desc.type === 'secret' || desc.type === 'sharedSecret') {
+        const masked = value === '***MASKED***';
+        savedFlags[desc.key] = masked;
+        elements.forEach(el => {
+            el.value = masked ? '' : (value || '');
+            el.dataset.hasSavedKey = masked ? 'true' : 'false';
+            if (masked) {
+                if (desc.maskedPlaceholder) el.placeholder = desc.maskedPlaceholder;
+            } else if (desc.plainPlaceholder) {
+                el.placeholder = desc.plainPlaceholder;
+            }
+        });
+        return;
+    }
+
+    elements.forEach(el => {
+        switch (desc.type) {
+            case 'bool': el.checked = !!value; break;
+            case 'boolDefaultOn': el.checked = value !== false; break;
+            case 'boolFromSelect': el.value = value ? 'true' : 'false'; break;
+            case 'int':
+                el.value = (value === undefined || value === null)
+                    ? String(desc.default) : String(value);
+                break;
+            default:
+                el.value = (value === undefined || value === null)
+                    ? (desc.default || '') : String(value);
+        }
+    });
+}
+
+/** Read one descriptor back; masks become ***KEEP_EXISTING*** on save. */
+function readField(desc, savedFlags) {
+    const el = fieldElements(desc)[0];
+    if (!el) return desc.default;
+    let value;
+    switch (desc.type) {
+        case 'secret':
+        case 'sharedSecret':
+            value = String(el.value || '').trim();
+            if (!value && savedFlags[desc.key]) return '***KEEP_EXISTING***';
+            return value;
+        case 'bool':
+        case 'boolDefaultOn':
+            return !!el.checked;
+        case 'boolFromSelect':
+            return el.value === 'true';
+        case 'int': {
+            const parsed = parseInt(el.value, 10);
+            const base = isNaN(parsed) ? desc.default : parsed;
+            return Math.min(desc.max, Math.max(desc.min, base));
+        }
+        case 'text':
+            return desc.trim ? String(el.value).trim() : String(el.value);
+        default:
+            return el.value;
+    }
+}
+
+/** Keep the config slice current as the user edits descriptor fields. */
+function wireConfigField(desc) {
+    fieldElements(desc).forEach(el => {
+        if (el.dataset.configBound === 'true') return;
+        el.dataset.configBound = 'true';
+        const event = (el.tagName === 'SELECT' || el.type === 'checkbox') ? 'change' : 'input';
+        el.addEventListener(event, () => {
+            const flags = (CONFIG_STATE.get('config') || {}).__savedFlags || {};
+            const patch = {};
+            patch[desc.key] = readField(desc, flags);
+            CONFIG_STATE.patch('config', patch, { source: 'dom', field: desc.key });
+        });
+    });
+}
+
 // Update quality presets based on format
 function updateQualityPresets() {
     const format = document.getElementById('outputFormat').value;
@@ -74,82 +212,50 @@ function updateQualityPresets() {
     }
 }
 
-// Load configuration
+// Load configuration — descriptors project API values into the DOM and store
+// them as the single config slice. Complex widgets project from that slice.
 async function loadConfiguration() {
     try {
         const response = await fetch('/api/config');
         const config = await response.json();
-        
-        document.getElementById('lidarrUrl').value = config.lidarr_url || '';
-        
-        // Don't overwrite API key field if it's masked - just leave it empty so user can enter new one
-        const apiKeyField = document.getElementById('lidarrApiKey');
-        if (config.lidarr_api_key === '***MASKED***') {
-            apiKeyField.placeholder = 'API Key configured (enter new key to change)';
-            apiKeyField.value = '';  // Leave empty
-            // Store the fact that we have an existing key
-            apiKeyField.dataset.hasSavedKey = 'true';
-        } else {
-            apiKeyField.value = config.lidarr_api_key || '';
-            apiKeyField.placeholder = 'Your Lidarr API Key';
-            apiKeyField.dataset.hasSavedKey = 'false';
-        }
-        
-        document.getElementById('outputFormat').value = config.output_format || 'mp3';
-        updateQualityPresets();
-        document.getElementById('quality').value = config.quality || '320k';
-        
-        // Audio processing options
-        document.getElementById('normalizeAudio').checked = config.normalize_audio || false;
-        document.getElementById('monoAudio').checked = config.mono_audio || false;
-        document.getElementById('sampleRate').value = config.sample_rate || 'original';
-        document.getElementById('removeSilence').checked = config.remove_silence || false;
-        document.getElementById('loudnessNorm').checked = config.loudness_normalization || false;
-        document.getElementById('channels').value = config.channels || 'original';
-        
-        // File management options
-        document.getElementById('autoCleanup').checked = config.auto_cleanup !== false;
-        document.getElementById('embedMetadata').checked = config.embed_metadata !== false;
-        document.getElementById('embedThumbnail').checked = config.embed_thumbnail !== false;
-        
-        // Metadata providers: reorderable list with toggles and expandable fields.
-        loadMetadataProviders(config);
 
-        // Optional API token
-        const tokenField = document.getElementById('authToken');
-        if (config.auth_token === '***MASKED***') {
-            tokenField.value = '';
-            tokenField.dataset.hasSavedKey = 'true';
-            tokenField.placeholder = 'Token configured (leave blank to keep)';
-        } else {
-            tokenField.value = config.auth_token || '';
-            tokenField.dataset.hasSavedKey = 'false';
-        }
-        
-        // Load path mappings
+        const savedFlags = {};
+        CONFIG_FIELDS.forEach(desc => {
+            if (desc.key === 'quality') return;  // applied after presets are built
+            loadField(desc, config, savedFlags);
+        });
+        updateQualityPresets();
+        loadField(QUALITY_FIELD, config, savedFlags);
+        CONFIG_FIELDS.forEach(wireConfigField);
+
+        // Historical projection with no persisted key: keep it out of the
+        // save payload so the server contract does not change.
+        const plexUrl = document.getElementById('plexUrl');
+        if (plexUrl) plexUrl.value = config.plex_url || '';
+
+        CONFIG_STATE.set('config', Object.assign({}, config, { __savedFlags: savedFlags }),
+            { source: 'api' });
+
+        // Metadata providers + path mappings are projected from the config
+        // snapshot; their drag/toggle state is written back by their modules.
+        loadMetadataProviders(config);
         const pathMappings = config.lidarr_path_mapping || {};
         Object.entries(pathMappings).forEach(([microPath, lidarrPath]) => {
             addPathMapping(lidarrPath, microPath);
         });
-        
-        const depthField = document.getElementById('searchResultsPerSource');
-        const savedDepth = config.search_results_per_source;
-        depthField.value = (savedDepth === undefined || savedDepth === null)
-            ? '3' : String(savedDepth);
-        
-        // Load source priorities
-        const priorities = config.source_priorities || [];
-        loadSourcePriorities(priorities);
-        const youtubeCookieFields = [...document.querySelectorAll('.youtube-cookies-field')];
+
+        // Source priorities now come from state (see sources.js). This also
+        // creates the YouTube cookie field, so (re)apply its descriptor now.
+        loadSourcePriorities(config.source_priorities || []);
+        loadField(COOKIES_FIELD, config, savedFlags);
+        wireConfigField(COOKIES_FIELD);
+
+        const youtubeCookieFields = Array.prototype.slice.call(
+            document.querySelectorAll('.youtube-cookies-field'));
         if (youtubeCookieFields.length) {
-            const savedCookies = config.youtube_cookies;
-            const masked = savedCookies === '***MASKED***';
             youtubeCookieFields.forEach(field => {
-                field.value = masked ? '' : (savedCookies || '');
-                field.dataset.hasSavedKey = masked ? 'true' : 'false';
-                field.placeholder = masked
-                    ? 'Cookies configured (leave blank to keep)'
-                    : 'Or paste Netscape-format cookies.txt from a signed-in browser';
+                if (field.dataset.cookieSync === 'true') return;
+                field.dataset.cookieSync = 'true';
                 field.addEventListener('input', () => {
                     youtubeCookieFields.forEach(other => {
                         if (other !== field) other.value = field.value;
@@ -159,128 +265,69 @@ async function loadConfiguration() {
             checkYouTubeLoginStatus();
             setTimeout(checkYouTubeLoginStatus, 300);
         }
-        
-        // Load request system settings
-        document.getElementById('enableRequests').checked = config.enable_requests || false;
-        document.getElementById('autoMonitorRequests').checked = config.auto_monitor_requests || false;
-        document.getElementById('enableJellyfin').checked = config.enable_jellyfin || false;
-        document.getElementById('jellyfinUrl').value = config.jellyfin_url || '';
-        document.getElementById('jellyfinApiKey').value = config.jellyfin_api_key || '';
-        document.getElementById('enableEmby').checked = config.enable_emby || false;
-        document.getElementById('embyUrl').value = config.emby_url || '';
-        document.getElementById('embyApiKey').value = config.emby_api_key || '';
-        document.getElementById('enablePlex').checked = config.enable_plex || false;
-        document.getElementById('plexUrl').value = config.plex_url || '';
-        document.getElementById('requestDefaultMonitored').value = config.request_default_monitored || 'false';
-        document.getElementById('requestSearchMissing').value = config.request_search_missing || 'false';
-        
     } catch (error) {
         console.error('Error loading configuration:', error);
         showNotification('Error loading configuration', 'error');
     }
 }
 
-// Save configuration
+// Save configuration — serialized from the config slice through descriptors.
 async function saveConfiguration() {
     try {
         showNotification('Saving configuration...', 'info');
-        
+
         const apiKeyField = document.getElementById('lidarrApiKey');
-        const apiKeyValue = apiKeyField.value.trim();
-        
-        // Build config object - ALWAYS include lidarr_api_key
-        const config = {
-            lidarr_url: document.getElementById('lidarrUrl').value,
-            lidarr_api_key: apiKeyValue || '',  // Always send it, empty string if no value
-            output_format: document.getElementById('outputFormat').value,
-            quality: document.getElementById('quality').value,
-            
-            // Audio processing
-            normalize_audio: document.getElementById('normalizeAudio').checked,
-            mono_audio: document.getElementById('monoAudio').checked,
-            sample_rate: document.getElementById('sampleRate').value,
-            remove_silence: document.getElementById('removeSilence').checked,
-            loudness_normalization: document.getElementById('loudnessNorm').checked,
-            channels: document.getElementById('channels').value,
-            
-            // File management
-            auto_cleanup: document.getElementById('autoCleanup').checked,
-            embed_metadata: document.getElementById('embedMetadata').checked,
-            embed_thumbnail: document.getElementById('embedThumbnail').checked,
-            
-            // Metadata providers (order, toggles, credential fields)
-            ...getMetadataProviderState(),
-            auth_token: document.getElementById('authToken').value.trim(),
-            
-            lidarr_path_mapping: getPathMappings(),
-            source_priorities: getSourcePriorities(),
-            youtube_cookies: (() => {
-                const field = document.querySelector('.youtube-cookies-field');
-                if (!field) return undefined;
-                const value = field.value.trim();
-                if (!value && field.dataset.hasSavedKey === 'true') {
-                    return '***KEEP_EXISTING***';
-                }
-                return value;
-            })(),
-            search_results_per_source: Math.min(10, Math.max(1,
-                parseInt(document.getElementById('searchResultsPerSource').value, 10) || 3)),
-            
-            // Request system settings
-            enable_requests: document.getElementById('enableRequests').checked,
-            auto_monitor_requests: document.getElementById('autoMonitorRequests').checked,
-            enable_jellyfin: document.getElementById('enableJellyfin').checked,
-            jellyfin_url: document.getElementById('jellyfinUrl').value,
-            jellyfin_api_key: document.getElementById('jellyfinApiKey').value,
-            enable_emby: document.getElementById('enableEmby').checked,
-            emby_url: document.getElementById('embyUrl').value,
-            emby_api_key: document.getElementById('embyApiKey').value,
-            enable_plex: document.getElementById('enablePlex').checked,
-            plex_url: document.getElementById('plexUrl').value,
-            request_default_monitored: document.getElementById('requestDefaultMonitored').value === 'true',
-            request_search_missing: document.getElementById('requestSearchMissing').value === 'true'
-        };
-        
-        // Special marker: if a secret field is empty but a saved value exists,
-        // ask the server to keep it instead of clearing it.
-        if (!apiKeyValue && apiKeyField.dataset.hasSavedKey === 'true') {
-            config.lidarr_api_key = '***KEEP_EXISTING***';
-        }
-        const tokenField = document.getElementById('authToken');
-        if (!config.auth_token && tokenField.dataset.hasSavedKey === 'true') {
-            config.auth_token = '***KEEP_EXISTING***';
-        }
-        
-        const secretKeys = ['lidarr_api_key', 'spotify_client_secret', 'discogs_token',
-            'acoustid_api_key', 'acoustid_user_key', 'auth_token'];
-        const loggable = { ...config };
-        for (const key of secretKeys) {
+        const apiKeyValue = String(apiKeyField.value || '').trim();
+
+        // Descriptor bindings keep the slice current as users edit; refresh
+        // once more here so a save always serializes the same source of truth.
+        const current = CONFIG_STATE.get('config') || {};
+        const savedFlags = Object.assign({}, current.__savedFlags || {});
+        const patch = {};
+        CONFIG_FIELDS.forEach(desc => { patch[desc.key] = readField(desc, savedFlags); });
+        CONFIG_STATE.patch('config', patch, { source: 'dom' });
+
+        const cfg = CONFIG_STATE.get('config');
+        const config = {};
+        CONFIG_FIELDS.forEach(desc => {
+            if (desc.type !== 'sharedSecret') config[desc.key] = cfg[desc.key];
+        });
+        Object.assign(config, getMetadataProviderState());
+        config.lidarr_path_mapping = getPathMappings();
+        config.source_priorities = getSourcePriorities();   // state, not DOM text
+        config.youtube_cookies = cfg[COOKIES_FIELD.key];
+
+        const loggable = Object.assign({}, config);
+        for (const key of SECRET_KEYS) {
             if (loggable[key] && loggable[key] !== '***KEEP_EXISTING***') {
                 loggable[key] = '***';
             }
         }
         console.log('Saving configuration:', loggable);
-        
+
         const response = await fetch('/api/config', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(config)
         });
-        
+
         if (!response.ok) {
             throw new Error(`HTTP error! status: ${response.status}`);
         }
-        
+
         const data = await response.json();
-        
+
         if (data.success) {
             showNotification('✅ Configuration saved successfully!', 'success');
-            
-            // If we saved a new API key, update the dataset
+
+            // If we saved a new API key, update the marker and clear the field.
             if (apiKeyValue) {
+                savedFlags.lidarr_api_key = true;
+                CONFIG_STATE.patch('config', { __savedFlags: savedFlags },
+                    { source: 'save' });
                 apiKeyField.dataset.hasSavedKey = 'true';
                 apiKeyField.placeholder = 'API Key configured (enter new key to change)';
-                apiKeyField.value = '';  // Clear the field for security
+                apiKeyField.value = '';
             }
         } else {
             showNotification('❌ Error: ' + (data.error || 'Unknown error'), 'error');
@@ -337,19 +384,9 @@ async function testLidarrConnection() {
     }
 }
 
+// Thin wrapper around the single ToastManager (no second toast implementation).
 function showYouTubeToast(message, type) {
-    let el = document.getElementById('youtube-login-toast');
-    if (!el) {
-        el = document.createElement('div');
-        el.id = 'youtube-login-toast';
-        el.style.cssText = 'position:fixed;bottom:20px;right:20px;z-index:10001;padding:12px 16px;border-radius:8px;color:white;box-shadow:0 4px 16px rgba(0,0,0,.3)';
-        document.body.appendChild(el);
-    }
-    el.textContent = message;
-    el.style.background = type === 'error' ? '#b91c1c' : '#047857';
-    el.style.display = 'block';
-    clearTimeout(el._timer);
-    el._timer = setTimeout(() => { el.style.display = 'none'; }, 5000);
+    return window.Blissful.toasts.youtube(message, type);
 }
 
 // Optional embedded YouTube login (compose --profile youtube-login).
@@ -409,5 +446,24 @@ async function closeYouTubeLogin() {
     checkYouTubeLoginStatus();
 }
 
-document.addEventListener('DOMContentLoaded', checkYouTubeLoginStatus);
-setInterval(checkYouTubeLoginStatus, 120000);
+// Tracked timer instead of a bare setInterval.
+document.addEventListener('DOMContentLoaded', () => {
+    checkYouTubeLoginStatus();
+    CONFIG_SCHED.start('youtubeStatus', checkYouTubeLoginStatus, 120000);
+});
+
+// Publish the descriptor-driven config API into the Blissful namespace.
+window.Blissful.register({
+    updateQualityPresets: updateQualityPresets,
+    loadConfiguration: loadConfiguration,
+    saveConfiguration: saveConfiguration,
+    testLidarrConnection: testLidarrConnection,
+    showYouTubeToast: showYouTubeToast,
+    checkYouTubeLoginStatus: checkYouTubeLoginStatus,
+    startYouTubeLogin: startYouTubeLogin,
+    finishYouTubeLogin: finishYouTubeLogin,
+    closeYouTubeLogin: closeYouTubeLogin,
+    CONFIG_FIELDS: CONFIG_FIELDS,
+    readField: readField,
+    loadField: loadField
+});

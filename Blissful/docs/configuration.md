@@ -20,6 +20,24 @@ Blissful has several configuration tabs:
 
 ---
 
+## 🧾 Configuration validation
+
+Configuration is validated when it is loaded, not only when it is saved. A
+hand-edited `config.json` with the wrong shape is repaired to its default:
+
+- `source_priorities` must be a list of objects with `name` and `search`
+  strings; malformed entries are dropped so source selection cannot fail deep
+  inside a download.
+- `metadata_provider_order` keeps only known providers and removes duplicates.
+- `search_results_per_source` is clamped to 1-10.
+- Other known keys with the wrong type fall back to their documented default.
+
+Environment variables still win over `config.json` and are applied before
+validation. Secrets are masked by `/api/config` and round-trip with
+`***KEEP_EXISTING***` on save.
+
+---
+
 ## 🔗 Lidarr Configuration
 
 ### **Basic Settings**

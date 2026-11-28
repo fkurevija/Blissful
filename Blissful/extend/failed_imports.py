@@ -34,13 +34,17 @@ except ImportError:  # pragma: no cover - direct execution / flat import
     from naming import render_track_filename  # type: ignore
 
 
-# Text Lidarr emits for a download problem Blissful can actually repair.
-UNHEALTHY_PATTERNS = (
-    'stalled with no connections',
-    'no files found are eligible',
-    'unable to communicate',
-    'download client',
+from extend.domain import (
+    COMMAND_TERMINAL_STATUSES,
+    JOB_TERMINAL_STATUSES,
+    UNHEALTHY_PATTERNS,
+    lower as _lower,
+    record_text as _record_text,
 )
+from extend.orchestration import poll_until
+
+# Kept as aliases so existing callers keep working; the values are owned
+# by extend.domain and are no longer duplicated here.
 
 # Rejections that mean "there is nothing to link into" - report, never fix.
 UNSUPPORTED_PATTERNS = (
@@ -66,9 +70,8 @@ _COMMAND_TIMEOUT_S = 180
 _POLL_INTERVAL_S = 2
 # 'cancelled' is terminal: a user-cancelled (or deleted) download job must
 # never leave cleanup polling until the 15-minute timeout.
-_JOB_TERMINAL = {'succeeded', 'failed', 'complete', 'completed', 'error',
-                'cancelled', 'canceled'}
-_COMMAND_TERMINAL = {'completed', 'failed', 'complete', 'error'}
+_JOB_TERMINAL = JOB_TERMINAL_STATUSES
+_COMMAND_TERMINAL = COMMAND_TERMINAL_STATUSES
 
 _DEFAULT_STANDARD_FORMAT = '{track:00} - {title}'
 _DEFAULT_MULTI_FORMAT = '{disc:00}-{track:00} - {title}'
@@ -83,24 +86,6 @@ def _sanitize_token(value):
     ``&`` is preserved so combined-file names survive verbatim.
     """
     return re.sub(r'[\\/:*?"<>|]', '', str(value)).strip()
-
-
-def _record_text(record):
-    """Build the searchable error text for a queue record."""
-    parts = [str((record or {}).get('errorMessage') or '')]
-    messages = (record or {}).get('statusMessages') or []
-    if isinstance(messages, dict):
-        messages = [messages]
-    for message in messages:
-        if isinstance(message, dict):
-            parts.append(str(message.get('title') or message.get('message') or ''))
-        else:
-            parts.append(str(message or ''))
-    return ' '.join(parts)
-
-
-def _lower(value):
-    return str(value or '').lower()
 
 
 class FailedImportsRetry:
@@ -451,18 +436,14 @@ class FailedImportsRetry:
         return {'status': 'timeout', 'failure_reason': 'job poll timeout'}
 
     def _poll_command(self, command_id):
-        deadline = time.monotonic() + _COMMAND_TIMEOUT_S
-        last = {}
-        while time.monotonic() < deadline:
-            try:
-                last = self._get_client().get_command(command_id) or {}
-            except Exception as exc:
-                return {'status': 'failed', 'message': str(exc)}
-            status = _lower(last.get('status'))
-            if status in _COMMAND_TERMINAL:
-                return last
-            time.sleep(_POLL_INTERVAL_S)
-        return {'status': 'timeout', 'message': 'command poll timeout'}
+        """Poll a Lidarr command through the shared orchestration loop."""
+        return poll_until(
+            lambda: self._get_client().get_command(command_id),
+            COMMAND_TERMINAL_STATUSES,
+            _COMMAND_TIMEOUT_S,
+            error_result=lambda exc: {'status': 'failed', 'message': str(exc)},
+            timeout_result={'status': 'timeout', 'message': 'command poll timeout'},
+        )
 
     # -------------------------------------------------------------- gap fill
     def gapfill_album(self, aid, apply=True, state=None, naming_config=None,

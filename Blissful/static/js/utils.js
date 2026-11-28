@@ -1,17 +1,14 @@
 ﻿/**
  * Utility Functions
  * Common utilities used across the application
+ *
+ * showNotification is a thin boundary wrapper around the single ToastManager
+ * owned by boot.js. The #notification DOM stays exactly as before.
  */
 
 // Show notification to user
 function showNotification(message, type = 'info') {
-    const notification = document.getElementById('notification');
-    notification.textContent = message;
-    notification.className = `notification ${type} show`;
-    
-    setTimeout(() => {
-        notification.classList.remove('show');
-    }, 3000);
+    return window.Blissful.toasts.notify(message, type);
 }
 
 // Tab switching
@@ -58,3 +55,12 @@ function toggleSection(sectionId) {
         header.classList.remove('collapsed');
     }
 }
+
+// Register the public API with the single Blissful namespace. boot.js installs
+// thin global aliases from this registry on DOMContentLoaded.
+window.Blissful.register({
+    showNotification: showNotification,
+    openTab: openTab,
+    checkHealth: checkHealth,
+    toggleSection: toggleSection
+});

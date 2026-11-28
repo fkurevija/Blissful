@@ -31,6 +31,16 @@ instead of reporting "no missing tracks" and leaving the torrent there.
 Progress from a child download job is written to the run that owns it,
 so cancelling a search cannot make its progress appear as a cleanup run.
 
+### Run state has one owner
+
+Every search or cleanup run is described by a single `RunState` owned by
+`extend/run_coordinator.py`. Admission (one run per kind), cancellation, child
+job membership and the status snapshot all live in that one place. Callbacks
+from download worker threads pass the owning run kind explicitly instead of
+inferring it from a thread-local or a source string, so progress from a
+cancelled search cannot surface as a cleanup run. `/api/wanted/status` reads
+that snapshot directly.
+
 ## Controls
 
 - **Enable wanted search controls** — gates the search endpoints. Off by default.

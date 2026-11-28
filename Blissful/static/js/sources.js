@@ -1,21 +1,81 @@
 ﻿/**
  * Source Management - Simplified
  * Direct list of searchable yt-dlp sources with enable/disable and reordering
+ *
+ * The ordered source list is a config slice; the DOM is only its projection.
  */
 
+const SrcB = window.Blissful;
+
 let draggedItem = null;
+
+function sourceState() {
+    const cfg = SrcB.state.get('config') || {};
+    if (!Array.isArray(cfg.source_priorities)) {
+        SrcB.state.patch('config', { source_priorities: [] }, { source: 'sources' });
+        return [];
+    }
+    return cfg.source_priorities;
+}
+
+function setSourceState(list) {
+    SrcB.state.patch('config', { source_priorities: list }, { source: 'sources' });
+}
+
+function sourceKey(source) {
+    return String(source.name || '') + '\u0000' + String(source.search || String(source.name || '').toLowerCase());
+}
+
+// Rebuild the state slice from DOM *data attributes* after a drag or toggle.
+// Names/searches are never parsed back out of <strong>/<small> textContent.
+function syncSourceStateFromDom() {
+    const container = document.getElementById('sourcePriorityList');
+    if (!container) return;
+    const byKey = Object.create(null);
+    sourceState().forEach(source => { byKey[sourceKey(source)] = source; });
+    const next = Array.prototype.slice.call(container.querySelectorAll('.source-priority-item'))
+        .map((item, index) => {
+            const name = item.dataset.sourceName || '';
+            const search = item.dataset.sourceSearch || name.toLowerCase();
+            const previous = byKey[sourceKey({ name: name, search: search })] || {};
+            const toggle = item.querySelector('input[type="checkbox"]');
+            const tier = parseInt(item.dataset.tier, 10) || previous.tier || 4;
+            return {
+                name: name,
+                search: search,
+                enabled: toggle ? toggle.checked : true,
+                tier: tier,
+                description: previous.description || '',
+                index: index
+            };
+        });
+    setSourceState(next);
+}
 
 // Load source priorities - shows ALL searchable sources
 function loadSourcePriorities(priorities) {
     // Spotify, Discogs and AcoustID are metadata-only; hide stale saved entries.
-    priorities = (priorities || []).filter(source =>
+    const visible = (priorities || []).filter(source =>
         !/spotify|discog|acoustid|chromaprint|musicbrainz|mbid/i.test(source.name || '') &&
-        !/spotify|discog|acoustid|chromaprint|musicbrainz|mbid/i.test(source.search || ''));
+        !/spotify|discog|acoustid|chromaprint|musicbrainz|mbid/i.test(source.search || ''))
+        .map(source => ({
+            name: source.name,
+            search: source.search || String(source.name || '').toLowerCase(),
+            enabled: source.enabled !== false,
+            tier: source.tier || 4,
+            description: source.description || ''
+        }));
+    setSourceState(visible);
+    renderSourceItems(visible);
+}
+
+function renderSourceItems(items) {
     const container = document.getElementById('sourcePriorityList');
+    if (!container) return;
     container.innerHTML = '';
-    
+
     // If no priorities configured, show all searchable sources from API
-    if (priorities.length === 0) {
+    if (!items.length) {
         // Will be populated after API loads
         setTimeout(() => {
             populateAllSearchableSources();
@@ -23,12 +83,10 @@ function loadSourcePriorities(priorities) {
         }, 100);
         return;
     }
-    
-    priorities.forEach((source, index) => {
-        const item = createSourcePriorityItem(source, index);
-        container.appendChild(item);
+
+    items.forEach((source, index) => {
+        container.appendChild(createSourcePriorityItem(source, index));
     });
-    
     updatePriorityBadges();
     if (typeof checkYouTubeLoginStatus === 'function') checkYouTubeLoginStatus();
 }
@@ -53,22 +111,16 @@ async function populateAllSearchableSources() {
             });
         
         const container = document.getElementById('sourcePriorityList');
-        container.innerHTML = '';
-        
-        // Add all searchable sources as enabled by default
-        searchableSources.forEach((source, index) => {
-            const sourceData = {
-                name: source.name,
-                search: source.ie_key || source.name.toLowerCase(),
-                enabled: true,
-                tier: source.tier,
-                description: source.description
-            };
-            const item = createSourcePriorityItem(sourceData, index);
-            container.appendChild(item);
-        });
-        
-        updatePriorityBadges();
+        if (!container) return;
+        const defaults = searchableSources.map(source => ({
+            name: source.name,
+            search: source.ie_key || source.name.toLowerCase(),
+            enabled: true,
+            tier: source.tier,
+            description: source.description
+        }));
+        setSourceState(defaults);
+        renderSourceItems(defaults);
         if (typeof checkYouTubeLoginStatus === 'function') checkYouTubeLoginStatus();
         console.log(`✅ Loaded ${searchableSources.length} searchable sources`);
         
@@ -91,7 +143,11 @@ function createSourcePriorityItem(source, index) {
     div.className = 'source-priority-item';
     div.draggable = true;
     div.dataset.index = index;
-    
+    // Serialization keys live in dataset, never in rendered text.
+    div.dataset.sourceName = source.name || '';
+    div.dataset.sourceSearch = source.search || String(source.name || '').toLowerCase();
+    div.dataset.tier = String(source.tier || 4);
+
     div.addEventListener('dragstart', handleDragStart);
     div.addEventListener('dragover', handleDragOver);
     div.addEventListener('drop', handleDrop);
@@ -210,6 +266,8 @@ function updatePriorityBadges() {
             toggle.onchange = () => toggleSource(index);
         }
     });
+    // Drag reorders physical nodes; mirror the new order into the slice.
+    syncSourceStateFromDom();
 }
 
 // Toggle source enabled/disabled
@@ -225,17 +283,18 @@ function toggleSource(index) {
             item.style.opacity = '0.6';
         }
     }
+    syncSourceStateFromDom();
 }
 
-// Filter sources
+// Filter sources — reads dataset keys, not rendered textContent.
 function filterSources() {
     const filter = document.getElementById('sourceFilter').value.toLowerCase();
     const items = document.querySelectorAll('.source-priority-item');
-    
+
     items.forEach(item => {
-        const name = item.querySelector('strong').textContent.toLowerCase();
-        const search = item.querySelector('small').textContent.toLowerCase();
-        
+        const name = (item.dataset.sourceName || '').toLowerCase();
+        const search = (item.dataset.sourceSearch || '').toLowerCase();
+
         if (name.includes(filter) || search.includes(filter)) {
             item.style.display = '';
         } else {
@@ -244,22 +303,14 @@ function filterSources() {
     });
 }
 
-// Get source priorities for saving
+// Get source priorities for saving — always from state, never DOM text.
 function getSourcePriorities() {
-    const items = document.querySelectorAll('.source-priority-item');
-    const priorities = [];
-    
-    items.forEach(item => {
-        const name = item.querySelector('strong').textContent;
-        const search = item.querySelector('small').textContent;
-        const enabled = item.querySelector('input[type="checkbox"]').checked;
-        const tierBadge = item.querySelector('.tier-badge');
-        const tier = tierBadge ? parseInt(tierBadge.textContent.match(/\d+/)[0]) : 4;
-        
-        priorities.push({ name, search, enabled, tier });
-    });
-    
-    return priorities;
+    return sourceState().map(source => ({
+        name: source.name,
+        search: source.search || String(source.name || '').toLowerCase(),
+        enabled: !!source.enabled,
+        tier: source.tier || 4
+    }));
 }
 
 // Load supported sources (called from main.js)
@@ -267,3 +318,15 @@ async function loadSupportedSources() {
     // No longer needed - sources are loaded as part of priority list
     console.log('Sources loaded via populateAllSearchableSources()');
 }
+
+window.Blissful.register({
+    loadSourcePriorities: loadSourcePriorities,
+    populateAllSearchableSources: populateAllSearchableSources,
+    createSourcePriorityItem: createSourcePriorityItem,
+    toggleSource: toggleSource,
+    filterSources: filterSources,
+    getSourcePriorities: getSourcePriorities,
+    loadSupportedSources: loadSupportedSources,
+    sourceState: sourceState,
+    setSourceState: setSourceState
+});

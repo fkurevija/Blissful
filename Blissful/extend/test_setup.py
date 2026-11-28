@@ -2,7 +2,12 @@
 """
 Blissful Setup and Testing Script
 Tests all components before running the full service
+
+This is a manual check script driven by main(); its functions return
+bool and inspect the local install, so pytest must not collect them.
 """
+
+__test__ = False
 
 import sys
 import os

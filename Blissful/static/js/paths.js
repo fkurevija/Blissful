@@ -97,3 +97,10 @@ async function autoPopulatePathMapping() {
         showNotification('Failed to detect paths from Lidarr', 'error');
     }
 }
+
+window.Blissful.register({
+    addPathMapping: addPathMapping,
+    removePathMapping: removePathMapping,
+    getPathMappings: getPathMappings,
+    autoPopulatePathMapping: autoPopulatePathMapping
+});
