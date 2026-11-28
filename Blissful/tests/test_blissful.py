@@ -1143,6 +1143,35 @@ def test_parent_progress_reaggregates_after_child_hook_update(tmp_path):
     assert mirrored['total_tracks'] == 63
 
 
+def test_parent_progress_keeps_run_grand_total_after_child_slice(tmp_path):
+    """A child job's slice (its missing tracks) must not overwrite the
+    parent run's grand total, or the bar flickers between the aggregate
+    and one album's remaining count (regression: bar showed 1 of 5 while
+    the log said track 1 of 19)."""
+    class Config:
+        def get_setting(self, key, default=None):
+            return default
+
+    manager = JobManager(Config(), None, str(tmp_path / 'jobs.json'))
+    parent, _ = manager.enqueue('search', {'mode': 'all', 'count': 1})
+    # The run-level callback publishes the grand total first (19 missing
+    # tracks across every stale album).
+    manager.update_job(parent['id'], progress={
+        'phase': 'preparing download',
+        'completed_tracks': 0,
+        'total_tracks': 19,
+    })
+    # One child job reports only its own slice (5 missing tracks of this
+    # album); the parent total must stay 19.
+    child, _ = manager.enqueue('album', {'artist': 'A', 'album': 'B'},
+                               parent_id=parent['id'])
+    manager.update_job(child['id'], progress={
+        'phase': 'track', 'completed_tracks': 1, 'total_tracks': 5})
+    mirrored = manager.get_job(parent['id'])['progress']
+    assert mirrored['completed_tracks'] == 1
+    assert mirrored['total_tracks'] == 19
+
+
 def test_same_kind_request_queues_while_other_kind_starts(tmp_path):
     class Config:
         def get_setting(self, key, default=None):
