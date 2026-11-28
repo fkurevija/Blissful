@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+from extend.config_schema import normalize_config
 from pathlib import Path
 from typing import Dict, Any
 
@@ -35,14 +36,15 @@ class ConfigManager:
                 # Merge defaults so upgrades always see newly introduced keys.
                 merged = defaults.copy()
                 merged.update(config if isinstance(config, dict) else {})
-                return self._apply_env_overrides(merged)
+                return normalize_config(self._apply_env_overrides(merged), defaults)[0]
             else:
                 # Return default configuration
                 logger.info("No config file found, using defaults")
-                return self._apply_env_overrides(defaults)
+                return normalize_config(self._apply_env_overrides(defaults), defaults)[0]
         except Exception as e:
             logger.error(f"Error loading configuration: {e}")
-            return self._apply_env_overrides(self._get_default_config())
+            return normalize_config(self._apply_env_overrides(self._get_default_config()),
+                                self._get_default_config())[0]
 
     def _apply_env_overrides(self, config: Dict[str, Any]) -> Dict[str, Any]:
         """Apply deployment secrets/settings supplied through environment variables.

@@ -108,6 +108,7 @@ curl -s http://localhost:7373/api/health
 - 🎯 **Per-Track Retry** - Failed tracks are listed on the Downloads tab and can be retried individually
 - ⏬ **Jump to Last** - Details-pane button scrolls straight to the newest log entry
 - 📱 **Compact Toast** - On mobile, tap the job toast to shrink it to a rounded square and tap again to expand
+- 🧱 **Hardened Architecture** - One owner for run state, validated configuration, and CI-enforced tests to reduce regressions
 - 🔐 **Optional API Security** - Bearer-token auth and restricted CORS for exposing Blissful beyond a trusted LAN
 
 ---

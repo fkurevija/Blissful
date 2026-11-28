@@ -63,6 +63,7 @@ Blissful is a Flask microservice that fills missing tracks in a Lidarr library b
 - 🗺️ **Path Mapping** - Support for remote/Docker Lidarr instances
 - 🔁 **Failed Import Recovery** - Retry unhealthy Lidarr imports with native duration/tag verification
 - 🔎 **Wanted Search** - Search missing albums and clean up stale torrents, dry-run by default
+- **🧱 Architecture** - Module boundaries, run-state ownership and invariants
 - 🔍 **Source Priorities** - Configure preferred download sources and candidates per source
 - 🏷️ **Metadata Providers** - Reorderable Spotify/Discogs/MusicBrainz and AcoustID fingerprint verification of downloads
 - 🔐 **Optional YouTube login** - Embedded browser sign-in (compose `--profile youtube-login`) with automatic cookie capture
@@ -74,6 +75,7 @@ Blissful is a Flask microservice that fills missing tracks in a Lidarr library b
 - ⏬ **Jump to Last** - Details-pane button scrolls straight to the newest log entry
 - 📱 **Compact Toast** - On mobile, tap the job toast to shrink it to a rounded square and tap again to expand
 - 🧭 **Sticky Table Headers** - Column labels stay visible while scrolling the Downloads, Wanted and in-app documentation tables
+- 🧱 **Hardened Architecture** - One owner for run state, validated configuration, and CI-enforced tests to reduce regressions
 - 🔐 **Optional API Security** - Bearer-token auth and restricted CORS for exposing Blissful beyond a trusted LAN
 
 ---

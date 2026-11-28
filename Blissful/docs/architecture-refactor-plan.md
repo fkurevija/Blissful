@@ -1,6 +1,6 @@
 # Architecture review and fragility reduction plan
 
-Status: proposal only. No application code was changed by this review.
+Status: implementation in progress on branch `refactor/fragility-redesign` (see `docs/architecture.md` for the implemented shape).
 
 Scope: the Blissful Flask app in this repository (single container, single persistent
 volume, home-server scale). The six uncommitted modified files in the working tree

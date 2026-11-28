@@ -61,6 +61,10 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+from extend.domain import CLEANUP, RUN_KINDS, SEARCH
+from extend.run_coordinator import RunCoordinator
+from extend.orchestration import coerce_ids
+
 
 
 
@@ -207,17 +211,9 @@ class WantedSearchService:
 
         self._last_scheduled = 0.0
 
-        # One run per kind may be active; a search and a cleanup can overlap.
-        self._active_by_kind = {'search': None, 'cleanup': None}
-        self._last_activity = None
-        self._active_lock = threading.Lock()
-        self._run_locks = {
-            'search': threading.Lock(), 'cleanup': threading.Lock()}
-        self._cancel_events = {
-            'search': threading.Event(), 'cleanup': threading.Event()}
-        self._run_job_ids_by_kind = {'search': set(), 'cleanup': set()}
-        self._local = threading.local()
-        self._last_kind = None
+        # One owner for all run-scoped state: admission, cancellation,
+        # snapshots and job membership. No thread-local kind fallback.
+        self._coordinator = RunCoordinator(self.job_manager)
         self._retry_wake = threading.Event()
 
     # ------------------------------------------------------------ gap fill
@@ -229,8 +225,7 @@ class WantedSearchService:
 
 
     def _gapfill_album(self, album_id, apply=True, source='stale-cleanup',
-
-                       progress_hook=None, parent_id=None):
+                       progress_hook=None, parent_id=None, kind=None):
 
         """Hand an album to Blissful's own download/tag/link engine."""
 
@@ -245,16 +240,10 @@ class WantedSearchService:
         if callable(engine):
 
             def progress(phase, **details):
-                # Child jobs run on worker threads, so the thread-local kind
-                # is unreliable; route progress by the run that owns the job.
-                run_kind = ('cleanup' if source == 'stale-cleanup'
-                            else 'search' if 'wanted' in str(source or '')
-                            else None)
-                if run_kind:
-                    self._set_active(kind=run_kind, phase=phase, album=album_id,
-                                     **details)
-                else:
-                    self._set_active(phase=phase, album=album_id, **details)
+                # The owning run's kind is passed in explicitly: it cannot be
+                # inferred from a worker thread's context or a source string.
+                self._set_active(kind=kind or SEARCH, phase=phase,
+                                 album=album_id, **details)
 
                 if progress_hook:
 
@@ -353,63 +342,49 @@ class WantedSearchService:
 
 
     def search(self, album_ids=None, apply=False, retry_job_id=None) -> dict:
-
         """Public search entry point; one search and one cleanup may overlap."""
-
-        kind = 'search'
-        self._local.kind = kind
-        if not self._run_locks[kind].acquire(blocking=False):
+        kind = SEARCH
+        if self._coordinator.begin(kind, phase='preparing',
+                                   started_at=time.time(), apply=bool(apply)) is None:
             job = self.queue_requested_run(
                 kind, album_ids=album_ids, apply=bool(apply))
             return {'success': True, 'queued': True, 'already_running': False,
                     'job': job, 'active': self.get_active(kind)}
 
-        self._cancel_events[kind].clear()
-        self._run_job_ids_by_kind[kind].clear()
-        self._set_active(kind=kind, phase='preparing', started_at=time.time(),
-                         apply=bool(apply))
-
         try:
             return self._search_impl(album_ids=album_ids, apply=apply,
                                      retry_job_id=retry_job_id)
         finally:
-            if self.get_active(kind) is not None:
-                status = 'cancelled' if self._cancel_events[kind].is_set() else 'completed'
+            active = self.get_active(kind)
+            if active is not None:
+                status = 'cancelled' if self._coordinator.is_cancelled(kind) else 'completed'
                 self._finish_active(status, kind=kind)
                 self._retry_wake.set()
-            self._run_locks[kind].release()
-            self._local.kind = None
+            self._coordinator.release(kind)
 
     def cleanup_stale(self, record_ids=None, apply=False, wait_minutes=10,
                       retry_job_id=None) -> dict:
-
         """Public cleanup entry point; one search and one cleanup may overlap."""
-
-        kind = 'cleanup'
-        self._local.kind = kind
-        if not self._run_locks[kind].acquire(blocking=False):
+        kind = CLEANUP
+        if self._coordinator.begin(kind, phase='starting',
+                                   started_at=time.time(), apply=bool(apply)) is None:
             job = self.queue_requested_run(
                 kind, record_ids=record_ids, apply=bool(apply),
                 wait_minutes=wait_minutes)
             return {'success': True, 'queued': True, 'already_running': False,
                     'job': job, 'active': self.get_active(kind)}
 
-        self._cancel_events[kind].clear()
-        self._run_job_ids_by_kind[kind].clear()
-        self._set_active(kind=kind, phase='starting', started_at=time.time(),
-                         apply=bool(apply))
-
         try:
             return self._cleanup_impl(record_ids=record_ids, apply=apply,
                                       wait_minutes=wait_minutes,
                                       retry_job_id=retry_job_id)
         finally:
-            if self.get_active(kind) is not None:
-                status = 'cancelled' if self._cancel_events[kind].is_set() else 'failed'
+            active = self.get_active(kind)
+            if active is not None:
+                status = 'cancelled' if self._coordinator.is_cancelled(kind) else 'failed'
                 self._finish_active(status, kind=kind)
                 self._retry_wake.set()
-            self._run_locks[kind].release()
-            self._local.kind = None
+            self._coordinator.release(kind)
 
     def queue_requested_run(self, kind, **params):
         """Persist a requested run so the dispatcher starts it when its slot frees."""
@@ -432,86 +407,45 @@ class WantedSearchService:
 
     def cancel_active(self, kind=None):
         """Cancel one run (or all runs when kind is None)."""
-        kinds = [kind] if kind in self._run_locks else list(self._run_locks)
-        changed = False
-        for run_kind in kinds:
-            active = self.get_active(run_kind)
-            was_running = bool(active) or self._run_locks[run_kind].locked()
-            if not was_running:
-                continue
-            self._cancel_events[run_kind].set()
-            if self.job_manager is not None:
-                try:
-                    job_ids = set(self._run_job_ids_by_kind[run_kind])
-                    run_job_id = (active or {}).get('run_job_id')
-                    if run_job_id:
-                        job_ids.add(run_job_id)
-                        for job in self.job_manager.list_jobs(
-                                limit=500, include_children=True):
-                            if job.get('parent_id') == run_job_id:
-                                job_ids.add(job['id'])
-                    for job_id in job_ids:
-                        self.job_manager.cancel_job(job_id)
-                except Exception:
-                    pass
-            if active is not None:
-                self._set_active(kind=run_kind, phase='cancelling',
-                                 cancel_requested=True)
-            changed = True
-        return changed
+        if kind is not None and kind not in RUN_KINDS:
+            return False
+        return self._coordinator.cancel(kind, cancel_all=kind is None)
+
+    # -------------------------------------------------- run state (delegated)
+    @property
+    def _run_locks(self):
+        return self._coordinator.run_locks
+
+    @property
+    def _cancel_events(self):
+        return self._coordinator.cancel_events
 
     def _current_kind(self, kind=None):
-        return (kind or getattr(self._local, 'kind', None)
-                or self._last_kind or 'search')
+        """Legacy snapshot resolution only; run code passes kind explicitly."""
+        return kind or self._coordinator.last_kind or SEARCH
 
     def _cancel_for(self, kind=None):
-        return self._cancel_events[self._current_kind(kind)]
+        return self._coordinator.cancel_event(self._current_kind(kind))
 
     def _run_ids_for(self, kind=None):
-        return self._run_job_ids_by_kind[self._current_kind(kind)]
+        return self._coordinator.job_ids(self._current_kind(kind))
 
     def get_active(self, kind=None):
-        """Snapshot of a run (defaults to the current or newest run)."""
-        with self._active_lock:
-            if kind:
-                active = self._active_by_kind.get(kind)
-                return dict(active) if active else None
-            for key in (getattr(self._local, 'kind', None),
-                        self._last_kind, 'search', 'cleanup'):
-                active = self._active_by_kind.get(key or '')
-                if active:
-                    return dict(active)
-            return None
+        return self._coordinator.get(kind)
 
     def get_actives(self):
-        """Snapshots of all in-flight runs, keyed by kind."""
-        with self._active_lock:
-            return {key: dict(value)
-                    for key, value in self._active_by_kind.items() if value}
+        return self._coordinator.get_all()
 
     def get_last_activity(self):
-        with self._active_lock:
-            return dict(self._last_activity) if self._last_activity else None
+        return self._coordinator.get_last_activity()
 
     def _set_active(self, **updates):
-        kind = self._current_kind(updates.get('kind'))
-        with self._active_lock:
-            active = dict(self._active_by_kind.get(kind) or {})
-            active.update(updates)
-            active['kind'] = kind
-            active['updated_at'] = time.time()
-            self._active_by_kind[kind] = active
-            self._last_kind = kind
-            return dict(active)
+        kind = updates.pop('kind', None) or self._coordinator.last_kind or SEARCH
+        return self._coordinator.update(kind, **updates)
 
     def _finish_active(self, status, kind=None):
-        kind = self._current_kind(kind)
-        with self._active_lock:
-            active = self._active_by_kind.get(kind)
-            if active:
-                active.update(status=status, finished_at=time.time())
-                self._last_activity = dict(active)
-                self._active_by_kind[kind] = None
+        return self._coordinator.finish(
+            kind or self._coordinator.last_kind or SEARCH, status)
 
     # ------------------------------------------------------------------ client
 
@@ -1054,9 +988,9 @@ class WantedSearchService:
 
 
 
-    def _finish_job(self, job_id, job_progress, success, failed, reason, result):
+    def _finish_job(self, job_id, job_progress, success, failed, reason, result, kind=None):
         """Write a run's final status, letting user cancellation win."""
-        if self._cancel_for().is_set():
+        if self._cancel_for(kind).is_set():
             job_progress(status='cancelled', failure_reason='cancelled by user',
                          result=result)
         elif failed and job_id and self.job_manager is not None:
@@ -1080,17 +1014,7 @@ class WantedSearchService:
 
         apply = bool(apply)
 
-        ids = []
-
-        for value in (album_ids or []):
-
-            try:
-
-                ids.append(int(value))
-
-            except (TypeError, ValueError):
-
-                continue
+        ids = coerce_ids(album_ids)
 
         mode = 'selected' if ids else 'all'
 
@@ -1353,7 +1277,7 @@ class WantedSearchService:
 
                     gap = self._gapfill_album(
 
-                        aid, apply=True, source='wanted-search-fallback',
+                        aid, apply=True, source='wanted-search-fallback', kind=SEARCH,
 
                         progress_hook=progress_hook,
 
@@ -1399,7 +1323,7 @@ class WantedSearchService:
 
                          bool(report['success']), not bool(report['success']),
 
-                         search_reason, search_result)
+                         search_reason, search_result, kind=SEARCH)
 
         return report
 
@@ -1869,7 +1793,7 @@ class WantedSearchService:
 
                         gap = self._gapfill_album(
 
-                            album_id, apply=True, source='stale-cleanup',
+                            album_id, apply=True, source='stale-cleanup', kind=CLEANUP,
 
                             progress_hook=progress_hook,
 
@@ -2066,7 +1990,7 @@ class WantedSearchService:
 
                              not bool(report.get('errors')), bool(report.get('errors')),
 
-                             cleanup_reason, cleanup_result)
+                             cleanup_reason, cleanup_result, kind=CLEANUP)
 
         return report
 
@@ -2098,7 +2022,7 @@ class WantedSearchService:
 
                 continue
 
-            if self._run_locks[job['kind']].locked():
+            if self._coordinator.is_locked(job['kind']):
                 continue
 
             due = job.get('next_attempt_at')
