@@ -457,6 +457,27 @@ function friendlySource(source) {
     return query ? label + ': ' + query : label;
 }
 
+/**
+ * Per-entry Track label: a 1-based track number within the current album.
+ * The backend holds a 0-based completed count (download_download_index);
+ * the run-level current_track is a cumulative count and is left as-is.
+ * The summary bar keeps the run's grand total (total_tracks).
+ */
+function albumTrackLabel(item) {
+    if (!item || item.download_track === undefined) return null;
+    const hasIndex = item.download_download_index !== undefined;
+    const raw = hasIndex ? item.download_download_index : item.current_track;
+    if (raw === undefined) return null;
+    const total = item.download_total_tracks !== undefined
+        ? item.download_total_tracks : item.total_tracks;
+    let index = Number(raw);
+    if (hasIndex) index += 1; // backend index is 0-based
+    if (Number.isFinite(index) && Number.isFinite(Number(total)) && Number(total) > 0) {
+        index = Math.min(Math.max(index, 1), Number(total));
+    }
+    return `current_track=${index} of ${total !== undefined ? total : '?'}`;
+}
+
 function statusClass(status) {
     const s = String(status || '').toLowerCase();
     if (s === 'rejected' || s === 'failed' || s === 'error') return 'log-status-bad';
@@ -762,17 +783,8 @@ function renderJobDetails(job) {
             const frag = document.createDocumentFragment();
             frag.appendChild(textRow('Track: '));
             frag.appendChild(textRow(String(item.download_track)));
-            // Log entries carry both album-level counts (download_download_index /
-            // download_total_tracks) and run-level totals (current_track /
-            // total_tracks). Show the album's own count for the individual log
-            // entry; the run-level total stays on the summary progress bar.
-            const cur = item.download_download_index !== undefined
-                ? item.download_download_index : item.current_track;
-            const total = item.download_total_tracks !== undefined
-                ? item.download_total_tracks : item.total_tracks;
-            if (cur !== undefined) {
-                frag.appendChild(meta([{ text: `current_track=${cur} of ${total !== undefined ? total : '?'}` }]));
-            }
+            const label = albumTrackLabel(item);
+            if (label) frag.appendChild(meta([{ text: label }]));
             entry.appendChild(bullet(frag));
         }
         if (item.download_source) {
@@ -841,11 +853,8 @@ function renderJobDetails(job) {
         }
         if (item.download_track) {
             let line = `○ Track: ${item.download_track}`;
-            const cur = item.download_download_index !== undefined
-                ? item.download_download_index : item.current_track;
-            const total = item.download_total_tracks !== undefined
-                ? item.download_total_tracks : item.total_tracks;
-            if (cur !== undefined) line += ` ( current_track=${cur} of ${total !== undefined ? total : '?'} )`;
+            const label = albumTrackLabel(item);
+            if (label) line += ` ( ${label} )`;
             lines.push(line);
         }
         if (item.download_source) lines.push(`○ Current Source:\n    ${friendlySource(item.download_source)}`);

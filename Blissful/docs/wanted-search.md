@@ -27,8 +27,10 @@ run total, so both show the same completed/total and stay on the aggregate
 total when the active album changes. One search and one cleanup can run
 at the same time, and further requests of the same kind are queued rather
 than rejected — the action buttons stay clickable and show a queued hint. A child retry keeps the original album track count as `total_tracks` and only shrinks the remaining work, so `completed_tracks` can never overrun `total_tracks`.
+
+The Details pane's per-entry `Track:` lines use the album's own count: a 1-based track number within that album (e.g. `current_track=1 of 5`). The summary progress bar uses the run grand total (e.g. `4 of 19`). The two numbers come from different scopes — the entry's album versus the whole run — so they can legitimately differ; neither is wrong.
+
 When Lidarr already has every track, cleanup removes the stuck queue row
-instead of reporting "no missing tracks" and leaving the torrent there.
 Progress from a child download job is written to the run that owns it,
 so cancelling a search cannot make its progress appear as a cleanup run.
 
