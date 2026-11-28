@@ -403,7 +403,14 @@ class JobManager:
         return None
 
     def _mirror_child_progress_locked(self, job):
-        """Surface child album track counts on the parent run for the UI bar."""
+        """Surface child album track counts on the parent run for the UI bar.
+
+        Children report their own slice (the missing tracks of that album);
+        the parent run owns the grand total across every album. Sum children's
+        completed counts into the parent, but never let one child's slice
+        overwrite or reset the run-level total -- that makes the progress bar
+        flicker between the grand total and one album's remaining count.
+        """
         parent_id = job.get('parent_id') or job.get('id')
         parent = next((p for p in self.jobs if p.get('id') == parent_id), None)
         if parent is None:
@@ -413,12 +420,15 @@ class JobManager:
             return
         completed = sum(int((c.get('progress') or {}).get('completed_tracks') or 0)
                         for c in children)
-        total = sum(int((c.get('progress') or {}).get('total_tracks') or 0)
-                    for c in children)
-        if not total:
-            return
         parent_progress = dict(parent.get('progress') or {})
         parent_progress['completed_tracks'] = completed
+        total = max(
+            int(parent_progress.get('total_tracks') or 0),
+            sum(int((c.get('progress') or {}).get('total_tracks') or 0)
+                for c in children),
+        )
+        if not total:
+            return
         parent_progress['total_tracks'] = total
         parent['progress'] = parent_progress
         parent['updated_at'] = _now()
