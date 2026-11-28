@@ -54,6 +54,9 @@
 .job-detail-heading { margin-top: 10px; font-weight: 600; color: var(--muted-foreground); }
 .job-details-header h3 { margin: 0; font-size: 18px; }
 .job-details-body { font-size: 13px; line-height: 1.5; color: var(--foreground, #fff); flex: 0 0 auto; min-height: 0; max-height: 32%; overflow-y: auto; }
+.job-details-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 14px; row-gap: 1px; }
+.job-details-fields .job-detail-line { min-width: 0; overflow-wrap: anywhere; }
+@media (max-width: 560px) { .job-details-fields { grid-template-columns: 1fr; } }
 /* ---- Enhanced job details ---- */
 .job-details-summary { flex: 0 0 auto; display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 10px; padding: 8px 10px; background: rgba(255,255,255,0.03); border: 1px solid var(--border, #444); border-radius: 5px; font-size: 12px; }
 .job-progress { flex: 1 1 160px; height: 8px; background: rgba(255,255,255,0.1); border-radius: 4px; overflow: hidden; min-width: 100px; }

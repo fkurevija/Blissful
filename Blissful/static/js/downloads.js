@@ -577,11 +577,14 @@ function renderJobDetails(job) {
         if (!fields.length && !log.length) {
             body.innerHTML = '<em>No details recorded.</em>';
         } else {
+            const fieldsWrap = document.createElement('div');
+            fieldsWrap.className = 'job-details-fields';
+            body.appendChild(fieldsWrap);
             fields.forEach(f => {
                 const line = document.createElement('div');
                 line.className = 'job-detail-line';
                 line.innerHTML = `<strong>${escapeHtml(f.label)}:</strong> ${escapeHtml(f.text)}`;
-                body.appendChild(line);
+                fieldsWrap.appendChild(line);
             });
             if (failures.length) {
                 const head = document.createElement('div');
